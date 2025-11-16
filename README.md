@@ -72,6 +72,14 @@ uv run econ-atlas samples collect --limit 3 --include-source wiley --include-sou
 ```
 This command reads `list.csv`, filters by `source_type`, fetches RSS entries, and saves each article's HTML to `samples/<source_type>/<journal-slug>/`.
 
+Protected sources (Wiley, Oxford, ScienceDirect, Chicago, INFORMS) require a headless Chromium session via Playwright to bypass Cloudflare/Akamai challenges. Install the browser runtime once:
+```bash
+uv run playwright install chromium
+```
+Optionally provide cookies or HTTP credentials via `.env` using `WILEY_COOKIES`, `OXFORD_COOKIES`, etc., and `*_BROWSER_USERNAME`/`*_BROWSER_PASSWORD` pairs. The browser sampler injects these before navigation and the CLI summary reports browser-mode successes/failures.
+
+> ⚠️ Chicago/INFORMS RSS feeds remain guarded by Cloudflare. Even with Playwright and copied article cookies, responses may still return the “Just a moment…” HTML instead of XML, so no samples are saved. To unblock these sources you must capture cookies from a successful RSS visit (not just article pages) or use an alternate feed/API.
+
 The CLI loads `.env` automatically in development. In production, supply `DEEPSEEK_API_KEY` via environment variables or your secret manager.
 
 ## Output

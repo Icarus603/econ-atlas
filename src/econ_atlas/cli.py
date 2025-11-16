@@ -140,13 +140,24 @@ def _resolve_include_sources(include_source: Optional[list[str]]) -> set[str]:
 
 
 def _print_sample_summary(report: SampleCollectorReport) -> None:
-    typer.echo(
+    summary = (
         f"Journals: {len(report.results)} | HTML files saved: {report.total_saved} | Failures: {len(report.failures)}"
     )
+    if report.total_browser_attempts:
+        summary += (
+            f" | Browser successes: {report.total_browser_successes}/{report.total_browser_attempts}"
+            f" | Browser failures: {report.total_browser_failures}"
+        )
+    typer.echo(summary)
     for result in report.results:
         status = "ok"
         if result.errors:
             status = "failed: " + "; ".join(result.errors)
+        browser_note = ""
+        if result.browser_attempts:
+            browser_note = (
+                f" (browser ok={result.browser_successes}, failed={result.browser_failures}, attempts={result.browser_attempts})"
+            )
         typer.echo(
-            f"  - {result.journal.name} [{result.journal.source_type}] saved={len(result.saved_files)} [{status}]"
+            f"  - {result.journal.name} [{result.journal.source_type}] saved={len(result.saved_files)} [{status}]{browser_note}"
         )

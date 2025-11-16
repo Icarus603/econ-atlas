@@ -52,12 +52,27 @@ econ-atlas 是一个自动化项目，用于维护 `list.csv` 中列出的经管
   uv run econ-atlas crawl
   ```
 - 常用参数：
-  - `--list-path PATH`：指定 CSV 清单（默认 `list.csv`）
-  - `--output-dir PATH`：JSON 输出目录（默认 `data/`）
-  - `--interval 12h` 或 `--interval-seconds 43200`：自定义间隔
-  - `--verbose/-v`：输出更详细的日志
+- `--list-path PATH`：指定 CSV 清单（默认 `list.csv`）
+- `--output-dir PATH`：JSON 输出目录（默认 `data/`）
+- `--interval 12h` 或 `--interval-seconds 43200`：自定义间隔
+- `--verbose/-v`：输出更详细的日志
 
 开发环境会自动加载 `.env`，部署到生产时请通过系统环境变量或密钥管理工具提供 `DEEPSEEK_API_KEY`。
+
+### HTML 样本采集
+
+用于解析器开发的 DOM 样本可以通过以下命令获取：
+```bash
+uv run econ-atlas samples collect --limit 3 --include-source wiley --include-source oxford
+```
+命令会读取 `list.csv`，过滤指定的 `source_type`，抓取 RSS 中的条目并保存 HTML 到 `samples/<source_type>/<journal-slug>/`。
+
+Wiley、Oxford、ScienceDirect、Chicago、INFORMS 等高防护站点需要借助 Playwright + Chromium 通过浏览器模式获取 HTML。首次运行前请安装浏览器依赖：
+```bash
+uv run playwright install chromium
+```
+可在 `.env` 中配置 `WILEY_COOKIES`、`OXFORD_COOKIES` 等 Cookie 变量，以及 `*_BROWSER_USERNAME`/`*_BROWSER_PASSWORD` 形式的 HTTP 凭证，浏览器采样器会在打开页面前自动注入，并在命令结束时输出浏览器模式的成功/失败统计。
+> ⚠️ Chicago / INFORMS 的 RSS 接口由 Cloudflare 严格防护。即使用 Playwright 和文章页面复制的 Cookie，也可能只拿到 “Just a moment...” HTML，导致无法保存样本。只有在成功访问 RSS 时抓取到对应 Cookie 或使用其他数据源/API 才能继续采样。
 
 ## 产出文件
 - 每本期刊对应 `data/<journal-slug>.json`，包含期刊信息、历史条目、翻译状态、抓取时间等。

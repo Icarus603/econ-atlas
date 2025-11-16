@@ -10,9 +10,11 @@ import httpx
 from slugify import slugify
 
 from econ_atlas.models import JournalSource, NormalizedFeedEntry
+from econ_atlas.source_profiling.browser_fetcher import BrowserCredentials, PlaywrightFetcher
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_FETCH_TIMEOUT = 30.0
+DEFAULT_BROWSER_TIMEOUT = 45.0
 BASE_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
@@ -39,6 +41,19 @@ class HtmlFetcher(Protocol):
         ...
 
 
+class BrowserHtmlFetcher(Protocol):
+    def fetch(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        cookies: dict[str, str] | None,
+        credentials: BrowserCredentials | None,
+        user_agent: str,
+    ) -> bytes:  # pragma: no cover - protocol hook
+        ...
+
+
 @dataclass
 class FetchRequest:
     url: str
@@ -51,6 +66,9 @@ class JournalSampleReport:
     journal: JournalSource
     saved_files: list[Path]
     errors: list[str]
+    browser_attempts: int = 0
+    browser_successes: int = 0
+    browser_failures: int = 0
 
     @property
     def succeeded(self) -> bool:
@@ -69,13 +87,33 @@ class SampleCollectorReport:
     def failures(self) -> list[JournalSampleReport]:
         return [result for result in self.results if result.errors]
 
+    @property
+    def total_browser_attempts(self) -> int:
+        return sum(result.browser_attempts for result in self.results)
+
+    @property
+    def total_browser_successes(self) -> int:
+        return sum(result.browser_successes for result in self.results)
+
+    @property
+    def total_browser_failures(self) -> int:
+        return sum(result.browser_failures for result in self.results)
+
 
 class SampleCollector:
     """Downloads article HTML samples for later inspection."""
 
-    def __init__(self, *, feed_client: FeedFetcher, fetch_html: HtmlFetcher | None = None):
+    def __init__(
+        self,
+        *,
+        feed_client: FeedFetcher,
+        fetch_html: HtmlFetcher | None = None,
+        browser_fetcher: BrowserHtmlFetcher | None = None,
+    ):
         self._feed_client = feed_client
         self._fetch_html = fetch_html or _default_fetch_html
+        self._browser_fetcher = browser_fetcher
+        self._protected_sources = PROTECTED_SOURCE_TYPES.copy()
 
     def collect(
         self,
@@ -105,39 +143,78 @@ class SampleCollector:
 
         target_dir = output_dir / journal.source_type / journal.slug
         target_dir.mkdir(parents=True, exist_ok=True)
-        saved_files: list[Path] = []
-        errors: list[str] = []
+        report = JournalSampleReport(journal=journal, saved_files=[], errors=[])
         seen_ids: set[str] = set()
 
         for entry in entries:
-            if limit_per_journal and len(saved_files) >= limit_per_journal:
+            if limit_per_journal and len(report.saved_files) >= limit_per_journal:
                 break
             entry_id = entry.entry_id or entry.link or ""
             if not entry_id:
-                errors.append("missing entry id")
+                report.errors.append("missing entry id")
                 continue
             if entry_id in seen_ids:
                 continue
             seen_ids.add(entry_id)
             if not entry.link:
-                errors.append(f"{entry_id}: missing link")
+                report.errors.append(f"{entry_id}: missing link")
                 continue
             request = _build_fetch_request(journal, entry)
             try:
-                html_bytes = self._fetch_html(
-                    request.url,
-                    headers=request.headers,
-                    cookies=request.cookies,
+                use_browser = journal.source_type in self._protected_sources
+                html_bytes = self._fetch_with_strategy(
+                    request=request,
+                    source_type=journal.source_type,
+                    use_browser=use_browser,
+                    report=report,
                 )
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("Failed to fetch HTML for %s (%s): %s", journal.name, entry.link, exc)
-                errors.append(f"{entry_id}: {exc}")
+                report.errors.append(f"{entry_id}: {exc}")
                 continue
             filename = _build_filename(entry)
             file_path = target_dir / filename
             file_path.write_bytes(html_bytes)
-            saved_files.append(file_path)
-        return JournalSampleReport(journal=journal, saved_files=saved_files, errors=errors)
+            report.saved_files.append(file_path)
+        return report
+
+    def _fetch_with_strategy(
+        self,
+        *,
+        request: FetchRequest,
+        source_type: str,
+        use_browser: bool,
+        report: JournalSampleReport,
+    ) -> bytes:
+        if use_browser:
+            fetcher = self._ensure_browser_fetcher()
+            report.browser_attempts += 1
+            headers = _browser_headers(request.headers)
+            credentials = _browser_credentials_for_source(source_type)
+            user_agent = headers.get("User-Agent", BASE_HEADERS["User-Agent"])
+            try:
+                html_bytes = fetcher.fetch(
+                    url=request.url,
+                    headers=headers,
+                    cookies=request.cookies,
+                    credentials=credentials,
+                    user_agent=user_agent,
+                )
+            except Exception:
+                report.browser_failures += 1
+                raise
+            report.browser_successes += 1
+            return html_bytes
+        return self._fetch_html(
+            request.url,
+            headers=request.headers,
+            cookies=request.cookies,
+        )
+
+    def _ensure_browser_fetcher(self) -> BrowserHtmlFetcher:
+        if self._browser_fetcher is None:
+            self._browser_fetcher = PlaywrightFetcher(timeout_seconds=DEFAULT_BROWSER_TIMEOUT)
+        return self._browser_fetcher
 
 
 def _default_fetch_html(
@@ -161,6 +238,21 @@ def _default_fetch_html(
     )
     response.raise_for_status()
     return response.content
+
+
+def _browser_headers(headers: dict[str, str]) -> dict[str, str]:
+    merged = dict(BASE_HEADERS)
+    merged.update(headers)
+    return merged
+
+
+def _browser_credentials_for_source(source_type: str) -> BrowserCredentials | None:
+    prefix = source_type.upper()
+    username = os.getenv(f"{prefix}_BROWSER_USERNAME")
+    password = os.getenv(f"{prefix}_BROWSER_PASSWORD")
+    if username and password:
+        return BrowserCredentials(username=username, password=password)
+    return None
 
 
 def _build_filename(entry: NormalizedFeedEntry) -> str:
@@ -217,14 +309,15 @@ def _cookies_for_source(source_type: str) -> dict[str, str] | None:
 
 def _parse_cookie_header(value: str) -> dict[str, str]:
     cookies: dict[str, str] = {}
-    for chunk in value.split(";"):
+    cleaned = value.strip().strip("\"'")
+    for chunk in cleaned.split(";"):
         trimmed = chunk.strip()
         if not trimmed:
             continue
         if "=" not in trimmed:
             continue
         name, cookie_value = trimmed.split("=", 1)
-        cookies[name.strip()] = cookie_value.strip()
+        cookies[name.strip().strip('\"\'')] = cookie_value.strip().strip('\"\'')
     return cookies
 COOKIE_ENV_MAP = {
     "wiley": "WILEY_COOKIES",
@@ -234,3 +327,5 @@ COOKIE_ENV_MAP = {
     "informs": "INFORMS_COOKIES",
     "nber": "NBER_COOKIES",
 }
+
+PROTECTED_SOURCE_TYPES = frozenset({"wiley", "oxford", "sciencedirect", "chicago", "informs"})

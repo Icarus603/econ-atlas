@@ -6,6 +6,7 @@ from econ_atlas.source_profiling.sample_collector import (
     JournalSampleReport,
     SampleCollector,
     _build_fetch_request,
+    _parse_cookie_header,
 )
 
 
@@ -35,7 +36,7 @@ def test_sample_collector_saves_files(tmp_path: Path) -> None:
         name="Journal",
         rss_url="https://example.com/rss",
         slug="journal",
-        source_type="wiley",
+        source_type="cambridge",
     )
     entries = [_entry("id-1", "https://example.com/one"), _entry("id-2", "https://example.com/two")]
     feed_client = StubFeedClient({"https://example.com/rss": entries})
@@ -56,7 +57,7 @@ def test_sample_collector_saves_files(tmp_path: Path) -> None:
     report = collector.collect([journal], limit_per_journal=5, output_dir=tmp_path)
 
     assert report.total_saved == 2
-    saved_dir = tmp_path / "wiley" / "journal"
+    saved_dir = tmp_path / "cambridge" / "journal"
     assert (saved_dir / "id-1.html").read_bytes() == b"<html>one</html>"
     assert (saved_dir / "id-2.html").read_bytes() == b"<html>two</html>"
     assert not report.failures
@@ -67,7 +68,7 @@ def test_sample_collector_records_errors(tmp_path: Path) -> None:
         name="Journal",
         rss_url="https://example.com/rss",
         slug="journal",
-        source_type="wiley",
+        source_type="cambridge",
     )
     entries = [_entry("id-1", "https://example.com/one")]
     feed_client = StubFeedClient({"https://example.com/rss": entries})
@@ -112,3 +113,88 @@ def test_build_fetch_request_cambridge_follow_redirect() -> None:
     request = _build_fetch_request(journal, entry)
     assert request.url == entry.link
     assert request.headers["Referer"] == "https://www.cambridge.org/"
+
+
+class StubBrowserFetcher:
+    def __init__(self, payloads: dict[str, bytes], should_fail: bool = False):
+        self.payloads = payloads
+        self.calls = 0
+        self.should_fail = should_fail
+
+    def fetch(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        cookies: dict[str, str] | None,
+        credentials,
+        user_agent: str,
+    ) -> bytes:
+        self.calls += 1
+        if self.should_fail:
+            raise RuntimeError("browser failed")
+        return self.payloads[url]
+
+
+def test_protected_source_routes_through_browser(tmp_path: Path) -> None:
+    journal = JournalSource(
+        name="Journal",
+        rss_url="https://example.com/rss",
+        slug="journal",
+        source_type="wiley",
+    )
+    entries = [_entry("id-1", "https://example.com/one"), _entry("id-2", "https://example.com/two")]
+    feed_client = StubFeedClient({"https://example.com/rss": entries})
+    payloads = {
+        "https://example.com/one": b"<html>browser-one</html>",
+        "https://example.com/two": b"<html>browser-two</html>",
+    }
+    browser_fetcher = StubBrowserFetcher(payloads)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("HTTP fetch should not be used for protected sources")
+
+    collector = SampleCollector(
+        feed_client=feed_client,
+        fetch_html=fail_if_called,
+        browser_fetcher=browser_fetcher,
+    )
+    report = collector.collect([journal], limit_per_journal=5, output_dir=tmp_path)
+
+    assert browser_fetcher.calls == 2
+    saved_dir = tmp_path / "wiley" / "journal"
+    assert (saved_dir / "id-1.html").read_bytes() == b"<html>browser-one</html>"
+    assert report.results[0].browser_attempts == 2
+    assert report.results[0].browser_successes == 2
+    assert report.results[0].browser_failures == 0
+
+
+def test_browser_failures_are_tracked(tmp_path: Path) -> None:
+    journal = JournalSource(
+        name="Journal",
+        rss_url="https://example.com/rss",
+        slug="journal",
+        source_type="wiley",
+    )
+    entries = [_entry("id-1", "https://example.com/one")]
+    feed_client = StubFeedClient({"https://example.com/rss": entries})
+    browser_fetcher = StubBrowserFetcher({}, should_fail=True)
+
+    collector = SampleCollector(
+        feed_client=feed_client,
+        browser_fetcher=browser_fetcher,
+    )
+    report = collector.collect([journal], limit_per_journal=2, output_dir=tmp_path)
+
+    result = report.results[0]
+    assert browser_fetcher.calls == 1
+    assert result.browser_attempts == 1
+    assert result.browser_failures == 1
+    assert result.browser_successes == 0
+    assert not result.saved_files
+
+
+def test_parse_cookie_header_strips_quotes() -> None:
+    value = "\"foo=bar; baz=qux==; token='abc'\""
+    parsed = _parse_cookie_header(value)
+    assert parsed == {"foo": "bar", "baz": "qux==", "token": "abc"}
