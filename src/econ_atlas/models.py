@@ -14,6 +14,7 @@ class JournalSource:
     name: str
     rss_url: str
     slug: str
+    source_type: str
     notes: str | None = None
 
 

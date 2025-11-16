@@ -1,42 +1,42 @@
-Unnamed: 0,期刊名称,期刊官网,RSS链接（中文直接在知网上复制RSS链接）,Unnamed: 4,Unnamed: 5,Unnamed: 6,Unnamed: 7,Unnamed: 8,Unnamed: 9,Unnamed: 10,备注,Unnamed: 12,Unnamed: 13,是否完成
-1,中国社会科学,,"https://rss.cnki.net/knavi/rss/ZSHK?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-2,经济研究,,"https://rss.cnki.net/knavi/rss/JJYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-3,世界经济,,"https://rss.cnki.net/knavi/rss/SJJJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-4,经济学（季刊）,https://navi.cnki.net/knavi/detail?p=utayN1oUkTbvqrDaZ6JV0YO5smi_ft_qt1aM3r2bx4bLqj2mbwm2TbHPQQuempjK8jpTO3P6rz9FAaN0qHFxkJAlhBSVZw5nRhUQiEsh46I=&uniplatform=NZKPT,"https://rss.cnki.net/knavi/rss/JJXU?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-5,管理科学学报,,"https://rss.cnki.net/knavi/rss/JCYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-6,管理世界,,"https://rss.cnki.net/knavi/rss/GLSJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-7,中国工业经济,,"https://rss.cnki.net/knavi/rss/GGYY?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-8,金融研究,,"https://rss.cnki.net/knavi/rss/JRYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-9,会计研究,,"https://rss.cnki.net/knavi/rss/KJYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-10,数量经济经与技术经济研究,,"https://rss.cnki.net/knavi/rss/SLJY?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-11,经济学动态,,"https://rss.cnki.net/knavi/rss/JJXD?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-12,中国经济史研究,,"https://rss.cnki.net/knavi/rss/ZJSY?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,
-13,American Economic Review,,,,,,,,,,,,,
-14,Journal of Political Economy,,https://www.journals.uchicago.edu/action/showFeed?type=etoc&feed=rss&jc=jpe,,,,,,,,缺摘要、作者,,,
-15,Quarterly Journal of Economics,,https://academic.oup.com/rss/site_5504/3365.xml,,,,,,,,缺作者,,,
-16,Review of Economic Studies,,https://academic.oup.com/rss/site_5508/3369.xml,,,,,,,,缺作者,,,
-17,Economic Journal,,https://academic.oup.com/rss/site_6182/4014.xml,,,,,,,,缺作者,,,
-18,International Economic Review,,https://onlinelibrary.wiley.com/feed/14682354/most-recent,,,,,,,,信息齐全,,,已完成
-19,Journal of Financial Economics,,https://rss.sciencedirect.com/publication/science/0304405X,,,,,,,,缺摘要,,,
-20,Review of Financial Studies,,https://academic.oup.com/rss/site_5511/3372.xml,,,,,,,,缺作者,,,
-21,Journal of Comparative Economics,,https://rss.sciencedirect.com/publication/science/01475967,,,,,,,,缺摘要,,,
-22,Journal of Development Economics,,https://rss.sciencedirect.com/publication/science/03043878,,,,,,,,缺摘要,,,
-23,Journal of Economic Behavior and Organization,,https://rss.sciencedirect.com/publication/science/01672681,,,,,,,,缺摘要,,,
-24,Journal of Environmental Economics and Management,,https://rss.sciencedirect.com/publication/science/00950696,,,,,,,,缺摘要,,,
-25,Journal of Public Economics,,https://rss.sciencedirect.com/publication/science/00472727,,,,,,,,缺摘要,,,
-26,Journal of Financial and Quantitative Analysis,,https://www.cambridge.org/core/rss/product/id/FB35548FF614F4556E96D01FA2CB412E,,,,,,,,信息齐全,,,已完成
-27,Journal of Corporate Finance,,https://rss.sciencedirect.com/publication/science/09291199,,,,,,,,缺摘要,,,
-28,Journal of Banking Finance,,https://rss.sciencedirect.com/publication/science/03784266,,,,,,,,缺摘要,,,
-29,Journal of Accounting Research,,https://onlinelibrary.wiley.com/feed/1475679x/most-recent,,,,,,,,信息齐全,,,已完成
-30,Journal of Accounting & Economics,,https://rss.sciencedirect.com/publication/science/01654101,,,,,,,,缺摘要,,,
-31,The Accounting Review,,,,,,,,,,,,,
-32,Management Science,,https://pubsonline.informs.org/action/showFeed?type=etoc&feed=rss&jc=mnsc,,,,,,,,缺摘要，而且似乎不是最新一期rss,,,
-33,Strategic Management Journal,,https://onlinelibrary.wiley.com/feed/10970266/most-recent,,,,,,,,信息齐全,,,已完成
-34,Journal of Empirical Finance,,https://rss.sciencedirect.com/publication/science/09275398,,,,,,,,缺摘要,,,
-35,NBER,https://www.nber.org/papers?page=1&perPage=50&sortBy=public_date,https://www.nber.org/api/v1/working_page_listing/contentType/working_paper/_/_/search?page=1&perPage=50&sortBy=public_date,,,,,,,,摘要不全,,,
-36,Journal of Economic History,,https://www.cambridge.org/core/rss/product/id/677F550CB2C69EFA1656654D487DE504,,,,,,,,信息齐全,,,已完成
-37,Explorations in Economic History,,https://rss.sciencedirect.com/publication/science/00144983,,,,,,,,缺摘要,,,
-38,Economic History Review,,https://onlinelibrary.wiley.com/feed/14680289/most-recent,,,,,,,,信息齐全,,,已完成
-39,Energy Economics,,https://rss.sciencedirect.com/publication/science/01409883,,,,,,,,缺摘要,,,
-40,Energy Policy,,https://rss.sciencedirect.com/publication/science/03014215,,,,,,,,缺摘要,,,
-41,Research Policy,,https://rss.sciencedirect.com/publication/science/00487333,,,,,,,,缺摘要,,,
+Unnamed: 0,期刊名称,期刊官网,RSS链接（中文直接在知网上复制RSS链接）,Unnamed: 4,Unnamed: 5,Unnamed: 6,Unnamed: 7,Unnamed: 8,Unnamed: 9,Unnamed: 10,备注,Unnamed: 12,Unnamed: 13,是否完成,source_type
+1,中国社会科学,,"https://rss.cnki.net/knavi/rss/ZSHK?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+2,经济研究,,"https://rss.cnki.net/knavi/rss/JJYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+3,世界经济,,"https://rss.cnki.net/knavi/rss/SJJJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+4,经济学（季刊）,https://navi.cnki.net/knavi/detail?p=utayN1oUkTbvqrDaZ6JV0YO5smi_ft_qt1aM3r2bx4bLqj2mbwm2TbHPQQuempjK8jpTO3P6rz9FAaN0qHFxkJAlhBSVZw5nRhUQiEsh46I=&uniplatform=NZKPT,"https://rss.cnki.net/knavi/rss/JJXU?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+5,管理科学学报,,"https://rss.cnki.net/knavi/rss/JCYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+6,管理世界,,"https://rss.cnki.net/knavi/rss/GLSJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+7,中国工业经济,,"https://rss.cnki.net/knavi/rss/GGYY?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+8,金融研究,,"https://rss.cnki.net/knavi/rss/JRYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+9,会计研究,,"https://rss.cnki.net/knavi/rss/KJYJ?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+10,数量经济经与技术经济研究,,"https://rss.cnki.net/knavi/rss/SLJY?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+11,经济学动态,,"https://rss.cnki.net/knavi/rss/JJXD?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+12,中国经济史研究,,"https://rss.cnki.net/knavi/rss/ZJSY?pcode=CJFD,CCJD",,,,,,,,摘要不全,,,,cnki
+13,American Economic Review,,,,,,,,,,,,,,
+14,Journal of Political Economy,,https://www.journals.uchicago.edu/action/showFeed?type=etoc&feed=rss&jc=jpe,,,,,,,,缺摘要、作者,,,,chicago
+15,Quarterly Journal of Economics,,https://academic.oup.com/rss/site_5504/3365.xml,,,,,,,,缺作者,,,,oxford
+16,Review of Economic Studies,,https://academic.oup.com/rss/site_5508/3369.xml,,,,,,,,缺作者,,,,oxford
+17,Economic Journal,,https://academic.oup.com/rss/site_6182/4014.xml,,,,,,,,缺作者,,,,oxford
+18,International Economic Review,,https://onlinelibrary.wiley.com/feed/14682354/most-recent,,,,,,,,信息齐全,,,已完成,wiley
+19,Journal of Financial Economics,,https://rss.sciencedirect.com/publication/science/0304405X,,,,,,,,缺摘要,,,,sciencedirect
+20,Review of Financial Studies,,https://academic.oup.com/rss/site_5511/3372.xml,,,,,,,,缺作者,,,,oxford
+21,Journal of Comparative Economics,,https://rss.sciencedirect.com/publication/science/01475967,,,,,,,,缺摘要,,,,sciencedirect
+22,Journal of Development Economics,,https://rss.sciencedirect.com/publication/science/03043878,,,,,,,,缺摘要,,,,sciencedirect
+23,Journal of Economic Behavior and Organization,,https://rss.sciencedirect.com/publication/science/01672681,,,,,,,,缺摘要,,,,sciencedirect
+24,Journal of Environmental Economics and Management,,https://rss.sciencedirect.com/publication/science/00950696,,,,,,,,缺摘要,,,,sciencedirect
+25,Journal of Public Economics,,https://rss.sciencedirect.com/publication/science/00472727,,,,,,,,缺摘要,,,,sciencedirect
+26,Journal of Financial and Quantitative Analysis,,https://www.cambridge.org/core/rss/product/id/FB35548FF614F4556E96D01FA2CB412E,,,,,,,,信息齐全,,,已完成,cambridge
+27,Journal of Corporate Finance,,https://rss.sciencedirect.com/publication/science/09291199,,,,,,,,缺摘要,,,,sciencedirect
+28,Journal of Banking Finance,,https://rss.sciencedirect.com/publication/science/03784266,,,,,,,,缺摘要,,,,sciencedirect
+29,Journal of Accounting Research,,https://onlinelibrary.wiley.com/feed/1475679x/most-recent,,,,,,,,信息齐全,,,已完成,wiley
+30,Journal of Accounting & Economics,,https://rss.sciencedirect.com/publication/science/01654101,,,,,,,,缺摘要,,,,sciencedirect
+31,The Accounting Review,,,,,,,,,,,,,,
+32,Management Science,,https://pubsonline.informs.org/action/showFeed?type=etoc&feed=rss&jc=mnsc,,,,,,,,缺摘要，而且似乎不是最新一期rss,,,,informs
+33,Strategic Management Journal,,https://onlinelibrary.wiley.com/feed/10970266/most-recent,,,,,,,,信息齐全,,,已完成,wiley
+34,Journal of Empirical Finance,,https://rss.sciencedirect.com/publication/science/09275398,,,,,,,,缺摘要,,,,sciencedirect
+35,NBER,https://www.nber.org/papers?page=1&perPage=50&sortBy=public_date,https://www.nber.org/api/v1/working_page_listing/contentType/working_paper/_/_/search?page=1&perPage=50&sortBy=public_date,,,,,,,,摘要不全,,,,nber
+36,Journal of Economic History,,https://www.cambridge.org/core/rss/product/id/677F550CB2C69EFA1656654D487DE504,,,,,,,,信息齐全,,,已完成,cambridge
+37,Explorations in Economic History,,https://rss.sciencedirect.com/publication/science/00144983,,,,,,,,缺摘要,,,,sciencedirect
+38,Economic History Review,,https://onlinelibrary.wiley.com/feed/14680289/most-recent,,,,,,,,信息齐全,,,已完成,wiley
+39,Energy Economics,,https://rss.sciencedirect.com/publication/science/01409883,,,,,,,,缺摘要,,,,sciencedirect
+40,Energy Policy,,https://rss.sciencedirect.com/publication/science/03014215,,,,,,,,缺摘要,,,,sciencedirect
+41,Research Policy,,https://rss.sciencedirect.com/publication/science/00487333,,,,,,,,缺摘要,,,,sciencedirect

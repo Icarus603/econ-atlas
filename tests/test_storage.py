@@ -28,7 +28,7 @@ def _sample_entry(status: TranslationStatus, abstract_zh: str | None) -> Article
 
 def test_storage_adds_and_updates_entries(tmp_path: Path) -> None:
     store = JournalStore(tmp_path)
-    journal = JournalSource(name="Journal", rss_url="https://example.com/rss", slug="journal")
+    journal = JournalSource(name="Journal", rss_url="https://example.com/rss", slug="journal", source_type="wiley")
 
     first = _sample_entry("failed", None)
     result = store.persist(journal, [first])

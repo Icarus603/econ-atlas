@@ -15,6 +15,17 @@ LOGGER = logging.getLogger(__name__)
 NAME_KEYS = ("期刊名称", "名称", "name", "journal")
 RSS_KEYS = ("RSS链接", "RSS链接（中文直接在知网上复制RSS链接）", "rss")
 NOTES_KEYS = ("备注", "notes")
+SOURCE_KEYS = ("source_type", "来源", "publisher", "source")
+ALLOWED_SOURCE_TYPES = {
+    "cnki",
+    "wiley",
+    "oxford",
+    "cambridge",
+    "sciencedirect",
+    "chicago",
+    "informs",
+    "nber",
+}
 
 
 class JournalListLoader:
@@ -43,8 +54,22 @@ class JournalListLoader:
                     LOGGER.warning("Skipping %s (row %s) because RSS is missing", name, index)
                     continue
 
+                source_type_value = _extract_value(row, SOURCE_KEYS)
+                normalized_source = _normalize_source_type(source_type_value)
+                if not normalized_source:
+                    LOGGER.warning("Skipping %s (row %s) due to invalid source_type '%s'", name, index, source_type_value)
+                    continue
+
                 slug = _unique_slug(name, slug_counts)
-                journals.append(JournalSource(name=name, rss_url=rss_url, slug=slug, notes=notes))
+                journals.append(
+                    JournalSource(
+                        name=name,
+                        rss_url=rss_url,
+                        slug=slug,
+                        source_type=normalized_source,
+                        notes=notes,
+                    )
+                )
         return journals
 
 
@@ -79,3 +104,12 @@ def _unique_slug(name: str, counter: Counter[str]) -> str:
     if counter[base] == 1:
         return base
     return f"{base}-{counter[base]}"
+
+
+def _normalize_source_type(value: str) -> str:
+    if not value:
+        return ""
+    normalized = value.strip().lower()
+    if normalized in ALLOWED_SOURCE_TYPES:
+        return normalized
+    return ""

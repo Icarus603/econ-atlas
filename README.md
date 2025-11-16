@@ -24,8 +24,9 @@ econ-atlas is an automation project that keeps track of economics and management
 - 🚧 Future work (not yet implemented): richer alerting/monitoring, missing-abstract scrapers, packaging for deployment, and production-ready scheduling integrations (cron/systemd).
 
 ## Repository Layout
-- `list.csv`: source-of-truth table with journal names and RSS URLs.
+- `list.csv`: source-of-truth table with journal names, RSS URLs, and `source_type` classifications (e.g., `cnki`, `wiley`, `sciencedirect`).
 - `src/econ_atlas/`: Python package containing the CLI, configuration, ingestion, translation, and storage modules.
+- `samples/`: HTML snapshots captured by the source-profiling utility (ignored by git).
 - `openspec/`: OpenSpec proposals/specs that document requirements and future changes.
 - `tests/`: unit tests for configuration, CSV loading, and storage behavior.
 
@@ -64,6 +65,12 @@ Key options:
 - `--output-dir PATH` – directory for per-journal JSON files (defaults to `data/`)
 - `--interval 12h` or `--interval-seconds 43200` – custom cadence for scheduled runs
 - `--verbose/-v` – verbose logging
+
+Collect HTML samples for non-Chinese journals to inform parser development:
+```bash
+uv run econ-atlas samples collect --limit 3 --include-source wiley --include-source oxford
+```
+This command reads `list.csv`, filters by `source_type`, fetches RSS entries, and saves each article's HTML to `samples/<source_type>/<journal-slug>/`.
 
 The CLI loads `.env` automatically in development. In production, supply `DEEPSEEK_API_KEY` via environment variables or your secret manager.
 
