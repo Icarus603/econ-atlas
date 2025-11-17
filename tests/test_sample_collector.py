@@ -6,6 +6,7 @@ import pytest
 
 from econ_atlas.models import JournalSource, NormalizedFeedEntry
 from econ_atlas.source_profiling.sample_collector import (
+    BrowserLaunchConfigurationError,
     JournalSampleReport,
     SampleCollector,
     _browser_wait_selector_for_source,
@@ -13,7 +14,6 @@ from econ_atlas.source_profiling.sample_collector import (
     _browser_user_agent_for_source,
     _build_fetch_request,
     _parse_cookie_header,
-    _rewrite_sciencedirect_url,
 )
 
 
@@ -135,6 +135,57 @@ def test_build_fetch_request_sciencedirect_rewrites_abs() -> None:
     assert request.headers["Referer"] == "https://www.sciencedirect.com/"
 
 
+def test_browser_launch_channel_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WILEY_BROWSER_CHANNEL", "chrome")
+    journal = JournalSource(
+        name="Journal",
+        rss_url="https://example.com/rss",
+        slug="journal",
+        source_type="wiley",
+    )
+    entry = _entry("id-1", "https://example.com/one")
+    feed_client = StubFeedClient({"https://example.com/rss": [entry]})
+    browser_fetcher = StubBrowserFetcher({"https://example.com/one": b"<html/>"})
+    collector = SampleCollector(feed_client=feed_client, browser_fetcher=browser_fetcher)
+    collector.collect([journal], output_dir=tmp_path, limit_per_journal=1)
+    assert browser_fetcher.last_browser_channel == "chrome"
+    assert browser_fetcher.last_executable_path is None
+
+
+def test_browser_launch_executable_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WILEY_BROWSER_EXECUTABLE", "~/Applications/Chrome")
+    journal = JournalSource(
+        name="Journal",
+        rss_url="https://example.com/rss",
+        slug="journal",
+        source_type="wiley",
+    )
+    entry = _entry("id-1", "https://example.com/one")
+    feed_client = StubFeedClient({"https://example.com/rss": [entry]})
+    browser_fetcher = StubBrowserFetcher({"https://example.com/one": b"<html/>"})
+    collector = SampleCollector(feed_client=feed_client, browser_fetcher=browser_fetcher)
+    collector.collect([journal], output_dir=tmp_path, limit_per_journal=1)
+    assert browser_fetcher.last_browser_channel is None
+    assert browser_fetcher.last_executable_path.endswith("Applications/Chrome")
+
+
+def test_browser_launch_options_conflict(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WILEY_BROWSER_CHANNEL", "chrome")
+    monkeypatch.setenv("WILEY_BROWSER_EXECUTABLE", "/Applications/Google Chrome.app")
+    journal = JournalSource(
+        name="Journal",
+        rss_url="https://example.com/rss",
+        slug="journal",
+        source_type="wiley",
+    )
+    entry = _entry("id-1", "https://example.com/one")
+    feed_client = StubFeedClient({"https://example.com/rss": [entry]})
+    browser_fetcher = StubBrowserFetcher({"https://example.com/one": b"<html/>"})
+    collector = SampleCollector(feed_client=feed_client, browser_fetcher=browser_fetcher)
+    with pytest.raises(BrowserLaunchConfigurationError):
+        collector.collect([journal], output_dir=tmp_path, limit_per_journal=1)
+
+
 class StubBrowserFetcher:
     def __init__(self, payloads: dict[str, bytes], should_fail: bool = False):
         self.payloads = payloads
@@ -144,6 +195,8 @@ class StubBrowserFetcher:
         self.last_extract_script: str | None = None
         self.last_init_scripts: Iterable[str] | None = None
         self.last_user_data_dir: str | None = None
+        self.last_browser_channel: str | None = None
+        self.last_executable_path: str | None = None
 
     def fetch(
         self,
@@ -151,7 +204,7 @@ class StubBrowserFetcher:
         url: str,
         headers: dict[str, str],
         cookies: dict[str, str] | None,
-        credentials,
+        credentials: object,
         user_agent: str,
         wait_selector: str | None = None,
         extract_script: str | None = None,
@@ -161,6 +214,8 @@ class StubBrowserFetcher:
         trace_path: Path | None = None,
         debug_dir: Path | None = None,
         debug_label: str | None = None,
+        browser_channel: str | None = None,
+        executable_path: str | None = None,
     ) -> bytes:
         self.calls += 1
         self.last_wait_selector = wait_selector
@@ -171,6 +226,8 @@ class StubBrowserFetcher:
         self.last_trace_path = trace_path
         self.last_debug_dir = debug_dir
         self.last_debug_label = debug_label
+        self.last_browser_channel = browser_channel
+        self.last_executable_path = executable_path
         if self.should_fail:
             raise RuntimeError("browser failed")
         return self.payloads[url]
@@ -191,7 +248,7 @@ def test_protected_source_routes_through_browser(tmp_path: Path) -> None:
     }
     browser_fetcher = StubBrowserFetcher(payloads)
 
-    def fail_if_called(*args, **kwargs):
+    def fail_if_called(*args: object, **kwargs: object) -> bytes:
         raise AssertionError("HTTP fetch should not be used for protected sources")
 
     collector = SampleCollector(
@@ -263,7 +320,9 @@ def test_sciencedirect_wait_selector_mapping() -> None:
     assert _browser_wait_selector_for_source("wiley") is None
 
 
-def test_sciencedirect_uses_wait_selector_and_rewritten_url(tmp_path: Path) -> None:
+def test_sciencedirect_uses_wait_selector_and_rewritten_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     journal = JournalSource(
         name="SciDir",
         rss_url="https://example.com/rss",
@@ -279,9 +338,60 @@ def test_sciencedirect_uses_wait_selector_and_rewritten_url(tmp_path: Path) -> N
         feed_client=feed_client,
         browser_fetcher=browser_fetcher,
     )
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    monkeypatch.setenv("SCIENCEDIRECT_USER_DATA_DIR", str(profile_dir))
     collector.collect([journal], limit_per_journal=1, output_dir=tmp_path)
 
     assert browser_fetcher.last_wait_selector == "script#__NEXT_DATA__"
     assert browser_fetcher.last_extract_script == "window.__NEXT_DATA__"
     assert browser_fetcher.last_init_scripts is not None
     assert browser_fetcher.last_headless is True
+
+
+def test_sciencedirect_requires_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    journal = JournalSource(
+        name="SciDir",
+        rss_url="https://example.com/rss",
+        slug="sci",
+        source_type="sciencedirect",
+    )
+    entry = _entry("id-1", "https://www.sciencedirect.com/science/article/pii/S0047272725001975")
+    feed_client = StubFeedClient({"https://example.com/rss": [entry]})
+    browser_fetcher = StubBrowserFetcher(
+        {"https://www.sciencedirect.com/science/article/pii/S0047272725001975": b"<html>ok</html>"}
+    )
+    monkeypatch.delenv("SCIENCEDIRECT_USER_DATA_DIR", raising=False)
+
+    collector = SampleCollector(
+        feed_client=feed_client,
+        browser_fetcher=browser_fetcher,
+    )
+    report = collector.collect([journal], limit_per_journal=1, output_dir=tmp_path)
+    assert "scd-session warmup" in report.results[0].errors[0]
+
+
+def test_sciencedirect_missing_json_marks_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    journal = JournalSource(
+        name="SciDir",
+        rss_url="https://example.com/rss",
+        slug="sci",
+        source_type="sciencedirect",
+    )
+    entry = _entry("id-1", "https://www.sciencedirect.com/science/article/pii/S0047272725001975")
+    feed_client = StubFeedClient({"https://example.com/rss": [entry]})
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    monkeypatch.setenv("SCIENCEDIRECT_USER_DATA_DIR", str(profile_dir))
+    browser_fetcher = StubBrowserFetcher(
+        {"https://www.sciencedirect.com/science/article/pii/S0047272725001975": b"<html>fallback</html>"}
+    )
+
+    collector = SampleCollector(
+        feed_client=feed_client,
+        browser_fetcher=browser_fetcher,
+    )
+    report = collector.collect([journal], limit_per_journal=1, output_dir=tmp_path)
+    result = report.results[0]
+    assert result.saved_files == []
+    assert any("window.__NEXT_DATA__" in message for message in result.errors)

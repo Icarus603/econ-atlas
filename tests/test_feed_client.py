@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import Any
 
 import pytest
 
@@ -38,9 +39,14 @@ class DummyResponse:
 
 
 def test_feed_client_applies_custom_headers_and_cookies(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, dict | None] = {}
+    captured: dict[str, dict[str, str] | None] = {}
 
-    def fake_get(url: str, timeout: float, headers: dict[str, str], cookies: dict[str, str] | None):
+    def fake_get(
+        url: str,
+        timeout: float,
+        headers: dict[str, str],
+        cookies: dict[str, str] | None,
+    ) -> DummyResponse:
         captured["headers"] = headers
         captured["cookies"] = cookies
         return DummyResponse(text=RSS_SAMPLE, headers={"Content-Type": "application/rss+xml"})
@@ -60,9 +66,17 @@ def test_feed_client_applies_custom_headers_and_cookies(monkeypatch: pytest.Monk
 class StubBrowserFetcher:
     def __init__(self, payload: bytes):
         self.payload = payload
-        self.calls: list[dict[str, str] | None] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def fetch(self, *, url: str, headers: dict[str, str], cookies, credentials, user_agent: str) -> bytes:
+    def fetch(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        cookies: dict[str, str] | None,
+        credentials: object,
+        user_agent: str,
+    ) -> bytes:
         self.calls.append({"url": url, "user_agent": user_agent, "cookies": cookies})
         return self.payload
 
@@ -83,7 +97,12 @@ def test_feed_client_parses_json_feed(monkeypatch: pytest.MonkeyPatch) -> None:
         }
     }
 
-    def fake_get(url: str, timeout: float, headers: dict[str, str], cookies: dict[str, str] | None):
+    def fake_get(
+        url: str,
+        timeout: float,
+        headers: dict[str, str],
+        cookies: dict[str, str] | None,
+    ) -> DummyResponse:
         return DummyResponse(
             text=json.dumps(payload),
             headers={"Content-Type": "application/json"},
@@ -106,7 +125,7 @@ def test_feed_client_parses_json_feed(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_feed_client_uses_browser_for_protected_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
     browser = StubBrowserFetcher(RSS_SAMPLE.encode("utf-8"))
 
-    def fail_http_get(*args, **kwargs):
+    def fail_http_get(*args: object, **kwargs: object) -> None:
         raise AssertionError("httpx should not be called for protected hosts")
 
     monkeypatch.setattr("econ_atlas.ingest.feed.httpx.get", fail_http_get)

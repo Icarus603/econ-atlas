@@ -5,7 +5,7 @@ import logging
 import json
 import os
 from datetime import datetime
-from typing import Any, Iterable, Sequence, Protocol
+from typing import Any, Iterable, Sequence, Protocol, cast
 from urllib.parse import urlparse
 
 import feedparser
@@ -13,7 +13,7 @@ import httpx
 from dateutil import parser as date_parser
 
 from econ_atlas.models import NormalizedFeedEntry
-from econ_atlas.source_profiling.browser_fetcher import PlaywrightFetcher
+from econ_atlas.source_profiling.browser_fetcher import BrowserCredentials, PlaywrightFetcher
 
 LOGGER = logging.getLogger(__name__)
 USER_AGENT = (
@@ -64,7 +64,7 @@ class BrowserFetcher(Protocol):
         url: str,
         headers: dict[str, str],
         cookies: dict[str, str] | None,
-        credentials,
+        credentials: BrowserCredentials | None,
         user_agent: str,
     ) -> bytes:
         ...
@@ -81,7 +81,7 @@ class FeedClient:
         protected_hosts: Iterable[str] | None = None,
     ):
         self._timeout = timeout
-        self._browser_fetcher = browser_fetcher
+        self._browser_fetcher: BrowserFetcher | None = browser_fetcher
         self._protected_hosts = set(protected_hosts) if protected_hosts else set(PROTECTED_FEED_HOSTS)
 
     def fetch(self, rss_url: str) -> list[NormalizedFeedEntry]:
@@ -164,7 +164,9 @@ class FeedClient:
 
     def _ensure_browser_fetcher(self) -> BrowserFetcher:
         if self._browser_fetcher is None:
-            self._browser_fetcher = PlaywrightFetcher()
+            fetcher: BrowserFetcher = PlaywrightFetcher()
+            self._browser_fetcher = fetcher
+        assert self._browser_fetcher is not None
         return self._browser_fetcher
 
 

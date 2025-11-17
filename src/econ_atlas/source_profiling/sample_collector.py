@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Protocol
@@ -58,6 +57,8 @@ class BrowserHtmlFetcher(Protocol):
         user_data_dir: str | None = None,
         headless: bool = True,
         trace_path: Path | None = None,
+        debug_dir: Path | None = None,
+        debug_label: str | None = None,
     ) -> bytes:  # pragma: no cover - protocol hook
         ...
 
@@ -77,6 +78,10 @@ class JournalSampleReport:
     browser_attempts: int = 0
     browser_successes: int = 0
     browser_failures: int = 0
+
+
+class BrowserLaunchConfigurationError(RuntimeError):
+    """Raised when browser launch overrides are misconfigured."""
 
     @property
     def succeeded(self) -> bool:
@@ -194,9 +199,20 @@ class SampleCollector:
                     debug_label=debug_label,
                 )
             except Exception as exc:  # noqa: BLE001
+                if isinstance(exc, BrowserLaunchConfigurationError):
+                    raise
                 LOGGER.warning("Failed to fetch HTML for %s (%s): %s", journal.name, entry.link, exc)
                 report.errors.append(f"{entry_id}: {exc}")
                 continue
+            if journal.source_type == "sciencedirect":
+                validation_error = _validate_sciencedirect_capture(
+                    html_bytes,
+                    debug_dir=per_entry_debug_dir,
+                    debug_label=debug_label,
+                )
+                if validation_error:
+                    report.errors.append(f"{entry_id}: {validation_error}")
+                    continue
             file_path = target_dir / filename
             file_path.write_bytes(html_bytes)
             report.saved_files.append(file_path)
@@ -225,7 +241,10 @@ class SampleCollector:
             if local_storage_entries:
                 init_scripts.append(_local_storage_script(local_storage_entries))
             user_data_dir = _browser_user_data_dir_for_source(source_type)
+            if source_type == "sciencedirect":
+                user_data_dir = _require_sciencedirect_profile(user_data_dir)
             headless = _browser_headless_for_source(source_type)
+            browser_channel, executable_path = _browser_launch_overrides(source_type)
             trace_path = None
             if debug_dir and debug_label and source_type == "sciencedirect":
                 trace_path = debug_dir / f"{debug_label}.zip"
@@ -244,6 +263,8 @@ class SampleCollector:
                     trace_path=trace_path,
                     debug_dir=debug_dir,
                     debug_label=debug_label,
+                    browser_channel=browser_channel,
+                    executable_path=executable_path,
                 )
             except Exception:
                 report.browser_failures += 1
@@ -464,6 +485,69 @@ def _browser_headless_for_source(source_type: str) -> bool:
     if value is None:
         return True
     return value.strip().lower() not in {"0", "false", "no"}
+
+
+def _browser_launch_overrides(source_type: str) -> tuple[str | None, str | None]:
+    prefix = source_type.upper()
+    channel = os.getenv(f"{prefix}_BROWSER_CHANNEL")
+    executable = os.getenv(f"{prefix}_BROWSER_EXECUTABLE")
+    if channel and executable:
+        raise BrowserLaunchConfigurationError(
+            f"{source_type} browser sampling cannot set both {prefix}_BROWSER_CHANNEL and "
+            f"{prefix}_BROWSER_EXECUTABLE; choose one."
+        )
+    normalized_channel = channel.strip() if channel and channel.strip() else None
+    normalized_executable = None
+    if executable and executable.strip():
+        normalized_executable = str(Path(executable.strip()).expanduser())
+    return normalized_channel, normalized_executable
+
+
+def _require_sciencedirect_profile(user_data_dir: str | None) -> str:
+    if not user_data_dir:
+        raise RuntimeError(
+            "ScienceDirect sampling requires SCIENCEDIRECT_USER_DATA_DIR. "
+            "Run `uv run econ-atlas samples scd-session warmup` first."
+        )
+    path = Path(user_data_dir).expanduser()
+    if not path.exists():
+        raise RuntimeError(
+            f"ScienceDirect profile directory '{path}' is missing. "
+            "Re-run `samples scd-session warmup` to refresh the session."
+        )
+    return str(path)
+
+
+def _validate_sciencedirect_capture(
+    html_bytes: bytes,
+    *,
+    debug_dir: Path | None,
+    debug_label: str | None,
+) -> str | None:
+    text = html_bytes.decode("utf-8", errors="ignore")
+    if "browser-snapshot-data" in text or "__NEXT_DATA__" in text:
+        return None
+    message = (
+        "ScienceDirect did not expose window.__NEXT_DATA__; "
+        "rerun the warmup command and try again with --sdir-debug for clues."
+    )
+    artifacts = _scd_debug_artifacts(debug_dir, debug_label)
+    if artifacts:
+        joined = ", ".join(artifacts)
+        message = f"{message} Debug files: {joined}"
+    return message
+
+
+def _scd_debug_artifacts(debug_dir: Path | None, debug_label: str | None) -> list[str]:
+    if not debug_dir or not debug_label:
+        return []
+    paths = [
+        debug_dir / f"{debug_label}.png",
+        debug_dir / f"{debug_label}.json",
+        debug_dir / f"{debug_label}.html",
+        debug_dir / f"{debug_label}.zip",
+    ]
+    return [str(path) for path in paths if path.exists()]
 
 
 _SCIDIR_FINGERPRINT_SCRIPT = """

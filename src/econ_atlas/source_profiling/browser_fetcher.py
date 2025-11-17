@@ -3,10 +3,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, TYPE_CHECKING, cast
 from urllib.parse import urlparse
 import json
 import re
+
+if TYPE_CHECKING:  # pragma: no cover
+    from playwright.sync_api import HttpCredentials
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +48,8 @@ class PlaywrightFetcher:
         debug_label: str | None = None,
         headless: bool = True,
         trace_path: Path | None = None,
+        browser_channel: str | None = None,
+        executable_path: str | None = None,
     ) -> bytes:
         try:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -62,18 +67,26 @@ class PlaywrightFetcher:
         try:
             with sync_playwright() as playwright:
                 browser = None
+                http_credentials: HttpCredentials | None = None
+                if credentials:
+                    http_credentials = cast(HttpCredentials, credentials.as_dict())
+                launch_kwargs: dict[str, Any] = {"headless": headless}
+                if executable_path:
+                    launch_kwargs["executable_path"] = executable_path
+                elif browser_channel:
+                    launch_kwargs["channel"] = browser_channel
                 if user_data_dir:
                     context = playwright.chromium.launch_persistent_context(
                         user_data_dir,
-                        headless=headless,
+                        **launch_kwargs,
                         user_agent=user_agent,
-                        http_credentials=credentials.as_dict() if credentials else None,
+                        http_credentials=http_credentials,
                     )
                 else:
-                    browser = playwright.chromium.launch(headless=headless)
+                    browser = playwright.chromium.launch(**launch_kwargs)
                     context_kwargs: dict[str, Any] = {"user_agent": user_agent}
-                    if credentials:
-                        context_kwargs["http_credentials"] = credentials.as_dict()
+                    if http_credentials:
+                        context_kwargs["http_credentials"] = http_credentials
                     context = browser.new_context(**context_kwargs)
                 if extra_headers:
                     context.set_extra_http_headers(extra_headers)
@@ -121,19 +134,22 @@ pre.textContent = {encoded};
 document.body.appendChild(pre);
 """
                         )
-                html = page.content()
+                html_text = page.content()
                 if debug_dir:
                     debug_dir.mkdir(parents=True, exist_ok=True)
                     safe_label = _safe_label(debug_label or url)
                     screenshot_path = debug_dir / f"{safe_label}.png"
                     meta_path = debug_dir / f"{safe_label}.json"
+                    dom_path = debug_dir / f"{safe_label}.html"
                     page.screenshot(path=str(screenshot_path), full_page=True)
                     meta = {"url": page.url, "title": page.title()}
                     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                    dom_path.write_text(html_text, encoding="utf-8")
                     LOGGER.info("Saved debug snapshot %s", screenshot_path)
                 if trace_path:
                     trace_path.parent.mkdir(parents=True, exist_ok=True)
                     context.tracing.stop(path=str(trace_path))
+                    LOGGER.info("Saved debug trace %s", trace_path)
                 context.close()
                 if browser:
                     browser.close()
@@ -141,7 +157,7 @@ document.body.appendChild(pre);
             raise TimeoutError(f"Timed out while waiting for {url} to finish loading") from exc
         except Exception:
             raise
-        return html.encode("utf-8")
+        return html_text.encode("utf-8")
 
 
 def _cookie_domain(url: str) -> str | None:

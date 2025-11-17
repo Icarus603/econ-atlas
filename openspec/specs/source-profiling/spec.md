@@ -20,17 +20,17 @@ Operators MUST be able to see which journals succeeded or failed during sample c
 - **THEN** it prints a summary table (journals attempted, HTML files saved, failures with reasons) and exits non-zero if any journal failed so operators know to retry or investigate.
 
 ### Requirement: Browser-backed sampling for protected sources
-Sample harvesting MUST detect high-protection `source_type` values (e.g., Wiley, Oxford, ScienceDirect, Chicago, INFORMS) and use a headless Chromium session via Playwright to fetch entry pages so Cloudflare/Akamai challenges complete before HTML is captured.
+Operators MUST be able to force protected-source sampling to launch Playwright with a user-specified Chrome build (channel or executable path) so warmed profiles and trusted TLS fingerprints can be reused whenever default Chromium is blocked.
 
-#### Scenario: Protected source routes through browser
-- **GIVEN** `samples collect` processes a journal whose `source_type` is in the protected allowlist
-- **WHEN** it follows each entry link
-- **THEN** it launches headless Chromium via Playwright, waits for the page to settle or hit a configurable timeout, and saves the rendered DOM to `samples/<source_type>/<slug>/<entry>.html`.
+#### Scenario: Launch with user-specified Chrome build
+- **GIVEN** `.env` supplies `SCIENCEDIRECT_BROWSER_CHANNEL=chrome` or `SCIENCEDIRECT_BROWSER_EXECUTABLE=/Applications/Google Chrome.app/...`
+- **WHEN** `samples collect --include-source sciencedirect` launches its Playwright browser
+- **THEN** it uses the provided channel/executable (falling back to default Chromium when unset) so operators can reuse their trusted Chrome profile and TLS fingerprint during sampling.
 
-#### Scenario: Report browser sampling status
-- **GIVEN** browser sampling runs for one or more entries
-- **WHEN** the command completes
-- **THEN** the summary output states how many entries succeeded or failed in browser mode so operators know if manual follow-up is required.
+#### Scenario: Invalid launch options are rejected
+- **GIVEN** both `*_BROWSER_CHANNEL` and `*_BROWSER_EXECUTABLE` are set for the same source
+- **WHEN** browser sampling is initialized
+- **THEN** the command fails fast with a descriptive error telling the operator to choose exactly one option before retrying, preventing Playwright from receiving conflicting launch arguments.
 
 ### Requirement: Credential/cookie injection for browser runs
 Operators MUST be able to supply login credentials and/or static cookies via `.env`/environment variables that the browser sampler injects before navigation while remaining optional for sites that do not need them.

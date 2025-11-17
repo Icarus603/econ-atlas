@@ -3,4 +3,7 @@
 .venv/
 data/
 samples/
+.cache/
 __pycache__/
+.idea/
+*.trace.zip

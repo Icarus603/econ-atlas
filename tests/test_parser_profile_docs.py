@@ -20,7 +20,7 @@ def _source_types() -> list[str]:
     samples_dir = Path("samples")
     if not samples_dir.exists():
         return []
-    return sorted(child.name for child in samples_dir.iterdir() if child.is_dir())
+    return sorted(child.name for child in samples_dir.iterdir() if child.is_dir() and not child.name.startswith("_"))
 
 
 @pytest.mark.parametrize("source_type", _source_types())
