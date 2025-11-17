@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Protocol
@@ -50,6 +52,12 @@ class BrowserHtmlFetcher(Protocol):
         cookies: dict[str, str] | None,
         credentials: BrowserCredentials | None,
         user_agent: str,
+        wait_selector: str | None = None,
+        extract_script: str | None = None,
+        init_scripts: Iterable[str] | None = None,
+        user_data_dir: str | None = None,
+        headless: bool = True,
+        trace_path: Path | None = None,
     ) -> bytes:  # pragma: no cover - protocol hook
         ...
 
@@ -109,11 +117,13 @@ class SampleCollector:
         feed_client: FeedFetcher,
         fetch_html: HtmlFetcher | None = None,
         browser_fetcher: BrowserHtmlFetcher | None = None,
+        sciencedirect_debug: bool = False,
     ):
         self._feed_client = feed_client
         self._fetch_html = fetch_html or _default_fetch_html
         self._browser_fetcher = browser_fetcher
         self._protected_sources = PROTECTED_SOURCE_TYPES.copy()
+        self._scd_debug = sciencedirect_debug
 
     def collect(
         self,
@@ -124,8 +134,14 @@ class SampleCollector:
     ) -> SampleCollectorReport:
         results: list[JournalSampleReport] = []
         output_dir.mkdir(parents=True, exist_ok=True)
+        scd_debug_dir = (output_dir / "_debug_sciencedirect") if self._scd_debug else None
         for journal in journals:
-            report = self._collect_for_journal(journal, limit_per_journal, output_dir)
+            report = self._collect_for_journal(
+                journal,
+                limit_per_journal,
+                output_dir,
+                debug_dir=scd_debug_dir,
+            )
             results.append(report)
         return SampleCollectorReport(results=results)
 
@@ -134,6 +150,7 @@ class SampleCollector:
         journal: JournalSource,
         limit_per_journal: int,
         output_dir: Path,
+        debug_dir: Path | None,
     ) -> JournalSampleReport:
         try:
             entries = self._feed_client.fetch(journal.rss_url)
@@ -160,6 +177,12 @@ class SampleCollector:
                 report.errors.append(f"{entry_id}: missing link")
                 continue
             request = _build_fetch_request(journal, entry)
+            filename = _build_filename(entry)
+            debug_label = None
+            per_entry_debug_dir = None
+            if debug_dir and journal.source_type == "sciencedirect":
+                per_entry_debug_dir = debug_dir
+                debug_label = filename.rsplit(".", 1)[0]
             try:
                 use_browser = journal.source_type in self._protected_sources
                 html_bytes = self._fetch_with_strategy(
@@ -167,12 +190,13 @@ class SampleCollector:
                     source_type=journal.source_type,
                     use_browser=use_browser,
                     report=report,
+                    debug_dir=per_entry_debug_dir,
+                    debug_label=debug_label,
                 )
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning("Failed to fetch HTML for %s (%s): %s", journal.name, entry.link, exc)
                 report.errors.append(f"{entry_id}: {exc}")
                 continue
-            filename = _build_filename(entry)
             file_path = target_dir / filename
             file_path.write_bytes(html_bytes)
             report.saved_files.append(file_path)
@@ -185,13 +209,26 @@ class SampleCollector:
         source_type: str,
         use_browser: bool,
         report: JournalSampleReport,
+        debug_dir: Path | None,
+        debug_label: str | None,
     ) -> bytes:
         if use_browser:
             fetcher = self._ensure_browser_fetcher()
             report.browser_attempts += 1
-            headers = _browser_headers(request.headers)
+            headers = _browser_headers(request.headers, source_type)
             credentials = _browser_credentials_for_source(source_type)
-            user_agent = headers.get("User-Agent", BASE_HEADERS["User-Agent"])
+            user_agent = _browser_user_agent_for_source(source_type, headers)
+            wait_selector = _browser_wait_selector_for_source(source_type)
+            extract_script = _browser_extract_script_for_source(source_type)
+            init_scripts = _browser_init_scripts_for_source(source_type)
+            local_storage_entries = _browser_local_storage_for_source(source_type)
+            if local_storage_entries:
+                init_scripts.append(_local_storage_script(local_storage_entries))
+            user_data_dir = _browser_user_data_dir_for_source(source_type)
+            headless = _browser_headless_for_source(source_type)
+            trace_path = None
+            if debug_dir and debug_label and source_type == "sciencedirect":
+                trace_path = debug_dir / f"{debug_label}.zip"
             try:
                 html_bytes = fetcher.fetch(
                     url=request.url,
@@ -199,6 +236,14 @@ class SampleCollector:
                     cookies=request.cookies,
                     credentials=credentials,
                     user_agent=user_agent,
+                    wait_selector=wait_selector,
+                    extract_script=extract_script,
+                    init_scripts=init_scripts or None,
+                    user_data_dir=user_data_dir,
+                    headless=headless,
+                    trace_path=trace_path,
+                    debug_dir=debug_dir,
+                    debug_label=debug_label,
                 )
             except Exception:
                 report.browser_failures += 1
@@ -240,10 +285,30 @@ def _default_fetch_html(
     return response.content
 
 
-def _browser_headers(headers: dict[str, str]) -> dict[str, str]:
+def _browser_headers(headers: dict[str, str], source_type: str) -> dict[str, str]:
     merged = dict(BASE_HEADERS)
     merged.update(headers)
+    extra = _browser_headers_from_env(source_type)
+    if extra:
+        merged.update(extra)
     return merged
+
+
+def _browser_headers_from_env(source_type: str) -> dict[str, str] | None:
+    env_key = f"{source_type.upper()}_BROWSER_HEADERS"
+    raw = os.getenv(env_key)
+    if not raw:
+        return None
+    parsed = _parse_header_mapping(raw)
+    return parsed or None
+
+
+def _browser_user_agent_for_source(source_type: str, headers: dict[str, str]) -> str:
+    env_key = f"{source_type.upper()}_BROWSER_USER_AGENT"
+    env_value = os.getenv(env_key)
+    if env_value:
+        return env_value.strip()
+    return headers.get("User-Agent", BASE_HEADERS["User-Agent"])
 
 
 def _browser_credentials_for_source(source_type: str) -> BrowserCredentials | None:
@@ -278,6 +343,7 @@ def _build_fetch_request(journal: JournalSource, entry: NormalizedFeedEntry) -> 
     elif journal.source_type == "chicago":
         headers["Referer"] = "https://www.journals.uchicago.edu/"
     elif journal.source_type == "sciencedirect":
+        url = _rewrite_sciencedirect_url(url)
         headers["Referer"] = "https://www.sciencedirect.com/"
     elif journal.source_type == "informs":
         headers["Referer"] = "https://pubsonline.informs.org/"
@@ -319,6 +385,101 @@ def _parse_cookie_header(value: str) -> dict[str, str]:
         name, cookie_value = trimmed.split("=", 1)
         cookies[name.strip().strip('\"\'')] = cookie_value.strip().strip('\"\'')
     return cookies
+
+
+def _parse_header_mapping(value: str) -> dict[str, str]:
+    cleaned = value.strip()
+    if not cleaned:
+        return {}
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return {str(key): str(val) for key, val in data.items()}
+    except json.JSONDecodeError:
+        pass
+    return _parse_cookie_header(cleaned)
+
+
+def _browser_wait_selector_for_source(source_type: str) -> str | None:
+    return {
+        "sciencedirect": "script#__NEXT_DATA__",
+    }.get(source_type)
+
+
+def _rewrite_sciencedirect_url(url: str) -> str:
+    if "www.sciencedirect.com" not in url:
+        return url
+    marker = "/science/article/abs/pii/"
+    if marker in url:
+        return url.replace(marker, "/science/article/pii/", 1)
+    return url
+
+
+def _browser_extract_script_for_source(source_type: str) -> str | None:
+    return {
+        "sciencedirect": "window.__NEXT_DATA__",
+    }.get(source_type)
+
+
+def _browser_init_scripts_for_source(source_type: str) -> list[str]:
+    scripts: list[str] = []
+    if source_type == "sciencedirect":
+        scripts.append(_SCIDIR_FINGERPRINT_SCRIPT)
+    env_value = os.getenv(f"{source_type.upper()}_BROWSER_INIT_SCRIPT")
+    if env_value:
+        path = Path(env_value)
+        if path.exists():
+            scripts.append(path.read_text(encoding="utf-8"))
+        else:
+            scripts.append(env_value)
+    return scripts
+
+
+def _browser_local_storage_for_source(source_type: str) -> dict[str, str] | None:
+    raw = os.getenv(f"{source_type.upper()}_BROWSER_LOCAL_STORAGE")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        LOGGER.warning("Invalid %s local storage JSON", source_type)
+        return None
+    if not isinstance(data, dict):
+        LOGGER.warning("Local storage JSON for %s must be an object", source_type)
+        return None
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def _browser_user_data_dir_for_source(source_type: str) -> str | None:
+    return os.getenv(f"{source_type.upper()}_USER_DATA_DIR")
+
+
+def _local_storage_script(entries: dict[str, str]) -> str:
+    payload = json.dumps(entries)
+    return f"(() => {{ const entries = {payload}; Object.entries(entries).forEach(([k, v]) => localStorage.setItem(k, v)); }})()"
+
+
+def _browser_headless_for_source(source_type: str) -> bool:
+    value = os.getenv(f"{source_type.upper()}_BROWSER_HEADLESS")
+    if value is None:
+        return True
+    return value.strip().lower() not in {"0", "false", "no"}
+
+
+_SCIDIR_FINGERPRINT_SCRIPT = """
+(() => {
+  Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+  window.chrome = window.chrome || { runtime: {} };
+  const originalPlugins = navigator.plugins;
+  Object.defineProperty(navigator, 'plugins', {
+    get: () => originalPlugins || [1, 2, 3],
+  });
+  const languages = navigator.languages;
+  Object.defineProperty(navigator, 'languages', {
+    get: () => languages || ['en-US', 'en']
+  });
+})();
+"""
 COOKIE_ENV_MAP = {
     "wiley": "WILEY_COOKIES",
     "oxford": "OXFORD_COOKIES",

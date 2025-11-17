@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
 from urllib.parse import urlparse
+import json
+import re
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +37,14 @@ class PlaywrightFetcher:
         cookies: dict[str, str] | None,
         credentials: BrowserCredentials | None,
         user_agent: str,
+        wait_selector: str | None = None,
+        extract_script: str | None = None,
+        init_scripts: Iterable[str] | None = None,
+        user_data_dir: str | None = None,
+        debug_dir: Path | None = None,
+        debug_label: str | None = None,
+        headless: bool = True,
+        trace_path: Path | None = None,
     ) -> bytes:
         try:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -50,11 +61,20 @@ class PlaywrightFetcher:
 
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
-                context_kwargs: dict[str, Any] = {"user_agent": user_agent}
-                if credentials:
-                    context_kwargs["http_credentials"] = credentials.as_dict()
-                context = browser.new_context(**context_kwargs)
+                browser = None
+                if user_data_dir:
+                    context = playwright.chromium.launch_persistent_context(
+                        user_data_dir,
+                        headless=headless,
+                        user_agent=user_agent,
+                        http_credentials=credentials.as_dict() if credentials else None,
+                    )
+                else:
+                    browser = playwright.chromium.launch(headless=headless)
+                    context_kwargs: dict[str, Any] = {"user_agent": user_agent}
+                    if credentials:
+                        context_kwargs["http_credentials"] = credentials.as_dict()
+                    context = browser.new_context(**context_kwargs)
                 if extra_headers:
                     context.set_extra_http_headers(extra_headers)
                 if cookies:
@@ -71,16 +91,52 @@ class PlaywrightFetcher:
                                 for name, value in cookies.items()
                             ]
                         )
+                if init_scripts:
+                    for script in init_scripts:
+                        context.add_init_script(script)
+                if trace_path:
+                    context.tracing.start(screenshots=True, snapshots=True, sources=False)
                 page = context.new_page()
                 page.goto(url, wait_until="domcontentloaded", timeout=self._timeout_ms)
+                if wait_selector:
+                    try:
+                        page.wait_for_selector(wait_selector, timeout=self._timeout_ms)
+                    except PlaywrightTimeoutError:
+                        LOGGER.debug("wait selector %s timed out for %s", wait_selector, url)
                 if self._idle_wait_ms:
                     try:
                         page.wait_for_load_state("networkidle", timeout=self._idle_wait_ms)
                     except PlaywrightTimeoutError:
                         LOGGER.debug("networkidle wait timed out for %s; returning DOM after DOMContentLoaded", url)
+                if extract_script:
+                    script_content = page.evaluate(f"JSON.stringify({extract_script})")
+                    if script_content and script_content != "null":
+                        encoded = json.dumps(script_content)
+                        page.evaluate(
+                            f"""
+const pre = document.createElement('pre');
+pre.id = 'browser-snapshot-data';
+pre.setAttribute('data-source', {repr(extract_script)});
+pre.textContent = {encoded};
+document.body.appendChild(pre);
+"""
+                        )
                 html = page.content()
+                if debug_dir:
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    safe_label = _safe_label(debug_label or url)
+                    screenshot_path = debug_dir / f"{safe_label}.png"
+                    meta_path = debug_dir / f"{safe_label}.json"
+                    page.screenshot(path=str(screenshot_path), full_page=True)
+                    meta = {"url": page.url, "title": page.title()}
+                    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+                    LOGGER.info("Saved debug snapshot %s", screenshot_path)
+                if trace_path:
+                    trace_path.parent.mkdir(parents=True, exist_ok=True)
+                    context.tracing.stop(path=str(trace_path))
                 context.close()
-                browser.close()
+                if browser:
+                    browser.close()
         except PlaywrightTimeoutError as exc:
             raise TimeoutError(f"Timed out while waiting for {url} to finish loading") from exc
         except Exception:
@@ -91,3 +147,7 @@ class PlaywrightFetcher:
 def _cookie_domain(url: str) -> str | None:
     parsed = urlparse(url)
     return parsed.hostname
+
+
+def _safe_label(label: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", label) or "page"

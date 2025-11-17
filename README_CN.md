@@ -67,12 +67,49 @@ uv run econ-atlas samples collect --limit 3 --include-source wiley --include-sou
 ```
 命令会读取 `list.csv`，过滤指定的 `source_type`，抓取 RSS 中的条目并保存 HTML 到 `samples/<source_type>/<journal-slug>/`。
 
+针对 ScienceDirect 可以开启调试：
+
+```bash
+uv run econ-atlas samples collect --include-source sciencedirect --limit 1 --sdir-debug
+```
+
+调试开启后会把截图与元数据写入 `samples/_debug_sciencedirect/`，方便排查 Cloudflare/Akamai 拦截。
+
+若在浏览器中手工保存了 HTML/JSON，也可以导入：
+
+```bash
+uv run econ-atlas samples import sciencedirect journal-slug ~/Downloads/article.html --entry-id manual
+```
+
+文件会被复制到 `samples/sciencedirect/<journal-slug>/manual.html`，便于 parser 回归使用。
+
+查看每个出版社/期刊已经有哪些样本：
+```bash
+uv run econ-atlas samples inventory --pretty
+```
+`samples inventory` 支持 `--format csv`，会输出每个 `source_type` 的样本数量、最新抓取时间以及手工备注（如“RSS 仍被 Cloudflare 拦截”），方便追踪遗漏的出版社。
+
 Wiley、Oxford、ScienceDirect、Chicago、INFORMS 等高防护站点需要借助 Playwright + Chromium 通过浏览器模式获取 HTML。首次运行前请安装浏览器依赖：
 ```bash
 uv run playwright install chromium
 ```
-可在 `.env` 中配置 `WILEY_COOKIES`、`OXFORD_COOKIES` 等 Cookie 变量，以及 `*_BROWSER_USERNAME`/`*_BROWSER_PASSWORD` 形式的 HTTP 凭证，浏览器采样器会在打开页面前自动注入，并在命令结束时输出浏览器模式的成功/失败统计。
+可在 `.env` 中配置 `WILEY_COOKIES`、`OXFORD_COOKIES` 等 Cookie 变量，以及 `*_BROWSER_USERNAME`/`*_BROWSER_PASSWORD` 形式的 HTTP 凭证，浏览器采样器会在打开页面前自动注入。如果站点还要求特定的 UA/Headers，可继续设置 `*_BROWSER_USER_AGENT` 以及 `*_BROWSER_HEADERS`（JSON 格式，键为 Header 名，值为字符串，例如 `{"Accept-Language":"zh-HK,...","sec-ch-ua":"\\"Chromium\\";v=\\"142\\""}`），就能让 Playwright 与真实浏览器完全一致。命令结束时会打印浏览器模式的成功/失败统计方便排查。
+
+ScienceDirect 额外支持：
+- `SCIENCEDIRECT_USER_DATA_DIR`：指向你本地 Chrome/Chromium profile，复用手工通过 Cloudflare 的 session。
+- `SCIENCEDIRECT_BROWSER_INIT_SCRIPT`：自定义或文件路径，内容会在每次启动时注入（可伪装 `navigator.webdriver`、`chrome.runtime` 等）。
+- `SCIENCEDIRECT_BROWSER_LOCAL_STORAGE`：JSON 对象，会在导航前写入 `localStorage`（例如 Optanon 或 TDM 凭证）。
+- `SCIENCEDIRECT_BROWSER_HEADLESS`：设为 `false` 可在调试 Cloudflare 时以可视窗口运行 Chromium，默认 `true`。
+
+采样器会把页面中的 `window.__NEXT_DATA__` 保存到 `<pre id="browser-snapshot-data">`，即便 DOM 没渲染也能让 parser 直接消费结构化数据。
 > ⚠️ Chicago / INFORMS 的 RSS 接口由 Cloudflare 严格防护。即使用 Playwright 和文章页面复制的 Cookie，也可能只拿到 “Just a moment...” HTML，导致无法保存样本。只有在成功访问 RSS 时抓取到对应 Cookie 或使用其他数据源/API 才能继续采样。
+
+### DOM 逆向与解析记录
+1. **定位样本**：运行 `samples inventory` 获取当前覆盖情况，再进入 `samples/<source_type>/<slug>/` 打开 HTML。
+2. **记录 selector**：在浏览器里加载本地 HTML（建议使用 DevTools 的 `Elements` 面板或 VS Code 的 “HTML Preview”），针对标题、作者、DOI、摘要、关键词/JEL、PDF 链接等字段，写下稳定的 CSS/XPath 或 JSON 路径。
+3. **同步文档**：把结论写入 `docs/parser_profiles/<source_type>.md`。文件中的表格需要覆盖所有必填字段（Title、Authors、Affiliations、DOI、Publication date、Abstract、Keywords/JEL、PDF link），并说明所需 Cookie/Headers、是否需要点击“Read more”等操作。
+4. **校验**：`pytest` 会自动检查每个 `source_type` 是否已有对应文档以及所有字段是否填写。当添加新样本或引入新出版社时，务必先补充文档再提交代码。
+5. **与 Playwright 关系**：Playwright 只负责拿到干净的 HTML/JSON，解析器逻辑完全脱离浏览器。文档越详细，parser 越容易在离线样本上反复回归测试。
 
 ## 产出文件
 - 每本期刊对应 `data/<journal-slug>.json`，包含期刊信息、历史条目、翻译状态、抓取时间等。

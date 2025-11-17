@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+import csv
+import json
 import logging
+import shutil
+from io import StringIO
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import typer
 from dotenv import load_dotenv
 
+from slugify import slugify
+
 from econ_atlas.config import SettingsError, build_settings
 from econ_atlas.ingest.feed import FeedClient
-from econ_atlas.runner import Runner, RunReport, run_scheduler
+from econ_atlas.runner import RunReport, Runner, run_scheduler
 from econ_atlas.source_profiling.sample_collector import SampleCollector, SampleCollectorReport
+from econ_atlas.source_profiling.sample_inventory import SourceInventory, build_inventory
 from econ_atlas.sources.list_loader import ALLOWED_SOURCE_TYPES, JournalListLoader
 from econ_atlas.storage.json_store import JournalStore
 from econ_atlas.translate.deepseek import DeepSeekTranslator
@@ -110,6 +117,11 @@ def collect_samples(
         help="Limit to specific source types (defaults to all non-cnki sources).",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging."),
+    sciencedirect_debug: bool = typer.Option(
+        False,
+        "--sdir-debug",
+        help="Capture ScienceDirect screenshots + metadata when sampling (write to samples/_debug_sciencedirect).",
+    ),
 ) -> None:
     """Download HTML samples for specified journals."""
     _configure_logging(verbose)
@@ -121,7 +133,7 @@ def collect_samples(
         typer.secho("No journals matched the requested source types.", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
 
-    collector = SampleCollector(feed_client=FeedClient())
+    collector = SampleCollector(feed_client=FeedClient(), sciencedirect_debug=sciencedirect_debug)
     report = collector.collect(filtered, limit_per_journal=limit, output_dir=output_dir)
     _print_sample_summary(report)
     if report.failures:
@@ -161,3 +173,84 @@ def _print_sample_summary(report: SampleCollectorReport) -> None:
         typer.echo(
             f"  - {result.journal.name} [{result.journal.source_type}] saved={len(result.saved_files)} [{status}]{browser_note}"
         )
+
+
+@samples_app.command("import")
+def import_sample(
+    source_type: str = typer.Argument(..., help="Source type folder (e.g., sciencedirect)."),
+    journal_slug: str = typer.Argument(..., help="Journal slug (matches list.csv)."),
+    input_file: Path = typer.Argument(..., exists=True, readable=True, help="HTML/JSON sample to import."),
+    output_dir: Path = typer.Option(Path("samples"), help="Directory where samples are stored."),
+    entry_id: Optional[str] = typer.Option(
+        None,
+        "--entry-id",
+        help="Optional identifier used to rename the file (slugified + preserves extension).",
+    ),
+) -> None:
+    """Import a manually captured HTML/JSON sample into the samples directory."""
+    filename = input_file.name
+    if entry_id:
+        safe = slugify(entry_id, lowercase=True, separator="-") or "entry"
+        filename = f"{safe}{input_file.suffix}"
+    destination = output_dir / source_type / journal_slug
+    destination.mkdir(parents=True, exist_ok=True)
+    target_path = destination / filename
+    shutil.copyfile(input_file, target_path)
+    typer.echo(f"Imported {input_file} -> {target_path}")
+
+
+@samples_app.command("inventory")
+def inventory_samples(
+    samples_dir: Path = typer.Option(Path("samples"), help="Directory containing HTML samples."),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Optional path to write the inventory (default: stdout)."
+    ),
+    output_format: Literal["json", "csv"] = typer.Option(
+        "json", "--format", help="Inventory output format.", case_sensitive=False
+    ),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Summarize available HTML samples per source_type and journal."""
+    inventories = build_inventory(samples_dir)
+    if not inventories:
+        typer.secho("No samples found. Run `samples collect` first.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+
+    content = _render_inventory(inventories, fmt=output_format.lower(), pretty=pretty)
+    if output:
+        output.write_text(content, encoding="utf-8")
+    else:
+        typer.echo(content)
+
+
+def _render_inventory(inventories: list[SourceInventory], fmt: str, pretty: bool) -> str:
+    if fmt == "csv":
+        buffer = StringIO()
+        fieldnames = [
+            "source_type",
+            "source_total_samples",
+            "source_latest_fetched_at",
+            "notes",
+            "journal_slug",
+            "journal_sample_count",
+            "journal_latest_fetched_at",
+        ]
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        for source in inventories:
+            for journal in source.journals:
+                writer.writerow(
+                    {
+                        "source_type": source.source_type,
+                        "source_total_samples": source.total_samples,
+                        "source_latest_fetched_at": source.latest_fetched_at.isoformat() if source.latest_fetched_at else "",
+                        "notes": source.notes or "",
+                        "journal_slug": journal.slug,
+                        "journal_sample_count": journal.sample_count,
+                        "journal_latest_fetched_at": journal.latest_fetched_at.isoformat() if journal.latest_fetched_at else "",
+                    }
+                )
+        return buffer.getvalue().strip()
+
+    payload = [source.to_dict() for source in inventories]
+    return json.dumps(payload, indent=2 if pretty else None)
