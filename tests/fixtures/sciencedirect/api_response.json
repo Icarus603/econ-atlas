@@ -1,0 +1,18 @@
+{
+  "full-text-retrieval-response": {
+    "coredata": {
+      "dc:title": "API Crowding out crowd support?",
+      "prism:doi": "10.1016/j.jpubeco.2025.105499",
+      "pii": "S0047272725001975",
+      "prism:coverDate": "2025-12-31",
+      "dc:creator": ["Alice Example", "Bob Example"],
+      "dc:description": "API abstract paragraph one.\n\nAPI paragraph two."
+    },
+    "authors": {
+      "author": [
+        {"ce:indexed-name": "Alice Example"},
+        {"ce:indexed-name": "Bob Example"}
+      ]
+    }
+  }
+}

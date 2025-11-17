@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import os
 import csv
 import json
 import logging
 import shutil
 from io import StringIO
-import os
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -25,12 +25,14 @@ from econ_atlas.source_profiling.scd_session import (
     warmup_sciencedirect_profile,
 )
 from econ_atlas.sources.list_loader import ALLOWED_SOURCE_TYPES, JournalListLoader
+from econ_atlas.sources.sciencedirect_parser import parse_sciencedirect_fallback
 from econ_atlas.storage.json_store import JournalStore
 from econ_atlas.translate.deepseek import DeepSeekTranslator
 
 app = typer.Typer(help="econ-atlas CLI")
 crawl_app = typer.Typer(help="Run RSS crawls")
 samples_app = typer.Typer(help="Collect HTML samples for source profiling")
+samples_parse_app = typer.Typer(help="Parse stored HTML samples")
 scd_session_app = typer.Typer(help="ScienceDirect session utilities")
 LOGGER = logging.getLogger(__name__)
 
@@ -67,11 +69,19 @@ def crawl(
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
+    if not settings.elsevier_api_key:
+        typer.secho(
+            "[ScienceDirect] ELSEVIER_API_KEY is missing; falling back to DOM parser.",
+            fg=typer.colors.YELLOW,
+        )
+
     runner = Runner(
         list_loader=JournalListLoader(settings.list_path),
         feed_client=FeedClient(),
         translator=DeepSeekTranslator(api_key=settings.deepseek_api_key),
         store=JournalStore(settings.output_dir),
+        sciencedirect_api_key=settings.elsevier_api_key,
+        sciencedirect_inst_token=settings.elsevier_inst_token,
     )
 
     if settings.run_once:
@@ -86,6 +96,7 @@ def crawl(
 app.add_typer(crawl_app, name="crawl")
 app.add_typer(samples_app, name="samples")
 samples_app.add_typer(scd_session_app, name="scd-session")
+samples_app.add_typer(samples_parse_app, name="parse")
 
 
 def _print_report(report: RunReport) -> None:
@@ -181,6 +192,85 @@ def _print_sample_summary(report: SampleCollectorReport) -> None:
         typer.echo(
             f"  - {result.journal.name} [{result.journal.source_type}] saved={len(result.saved_files)} [{status}]{browser_note}"
         )
+
+
+@samples_parse_app.command("sciencedirect")
+def parse_sciencedirect_samples(
+    input_dir: Path = typer.Option(
+        Path("samples/sciencedirect"),
+        "--input-dir",
+        "--input",
+        "-i",
+        exists=False,
+        file_okay=False,
+        dir_okay=True,
+        help="Directory that contains ScienceDirect HTML samples (defaults to samples/sciencedirect).",
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Optional path to write the parsed JSON report."
+    ),
+) -> None:
+    """Parse ScienceDirect fallback HTML samples and report coverage."""
+
+    if not input_dir.exists():
+        typer.secho(f"Input directory not found: {input_dir}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    html_files = sorted(input_dir.rglob("*.html"))
+    if not html_files:
+        typer.secho("No HTML samples found. Run `samples collect` or place files under the directory.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+
+    parsed_records: list[dict[str, object]] = []
+    parse_failures: list[tuple[Path, str]] = []
+    missing_records: list[tuple[Path, dict[str, str]]] = []
+
+    for html_path in html_files:
+        try:
+            html = html_path.read_text(encoding="utf-8")
+            article = parse_sciencedirect_fallback(html)
+        except Exception as exc:  # noqa: BLE001
+            parse_failures.append((html_path, str(exc)))
+            continue
+
+        record = article.to_dict()
+        record.update({"file": str(html_path), "journal": html_path.parent.name})
+        parsed_records.append(record)
+        missing = article.missing_fields()
+        if missing:
+            missing_records.append((html_path, missing))
+
+    if output:
+        payload = {
+            "parsed": parsed_records,
+            "failures": [{"file": str(path), "error": error} for path, error in parse_failures],
+        }
+        output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    summary = (
+        f"Files: {len(html_files)} | parsed: {len(parsed_records)} | failures: {len(parse_failures)}"
+        f" | missing-fields: {len(missing_records)}"
+    )
+    color = typer.colors.GREEN
+    if parse_failures or missing_records:
+        color = typer.colors.YELLOW
+    if parse_failures:
+        color = typer.colors.RED
+    typer.secho(summary, fg=color)
+
+    if parse_failures:
+        typer.secho("Parse failures:", fg=typer.colors.RED)
+        for path, error in parse_failures:
+            typer.secho(f"  - {path}: {error}", fg=typer.colors.RED)
+
+    if missing_records:
+        typer.secho("Missing fields detected:", fg=typer.colors.YELLOW)
+        for path, missing in missing_records:
+            details = ", ".join(f"{field}={reason}" for field, reason in missing.items())
+            typer.secho(f"  - {path}: {details}", fg=typer.colors.YELLOW)
+
+    if parse_failures or missing_records:
+        raise typer.Exit(code=1)
 
 
 @scd_session_app.command("warmup")

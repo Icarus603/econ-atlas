@@ -1,8 +1,4 @@
-# crawler-cli Specification
-
-## Purpose
-TBD - created by archiving change plan-crawler-foundation. Update Purpose after archive.
-## Requirements
+## MODIFIED Requirements
 ### Requirement: CLI runs manual or scheduled crawls
 The `econ-atlas` CLI MUST support both one-off executions and repeating schedules while choosing the appropriate enrichment strategy for each source.
 
@@ -18,17 +14,3 @@ The CLI MUST read `.env` / environment variables, validate required secrets, and
 - **GIVEN** no `ELSEVIER_API_KEY` is present
 - **WHEN** `econ-atlas crawl` starts
 - **THEN** the CLI prints a warning that ScienceDirect will use the degraded fallback path, but the run proceeds so other journals are unaffected.
-
-### Requirement: Operator controls and surfacing
-Operators MUST be able to point the CLI at alternate input/output paths and see a concise summary of what happened.
-
-#### Scenario: Alternate paths
-- **GIVEN** the user passes `--list-path /tmp/list.csv --output-dir data/custom`
-- **WHEN** the crawl runs
-- **THEN** the CLI reads that CSV and writes JSON files into the custom directory without touching defaults.
-
-#### Scenario: Execution summary
-- **GIVEN** a crawl completes (manual or scheduled run tick)
-- **WHEN** the CLI finalizes the tick
-- **THEN** it prints structured counts (journals processed, new articles, translations attempted/failed) so operators can monitor runs without digging into JSON.
-

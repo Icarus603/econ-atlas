@@ -5,7 +5,7 @@ import logging
 import json
 import os
 from datetime import datetime
-from typing import Any, Iterable, Sequence, Protocol, cast
+from typing import Any, Iterable, Sequence, Protocol
 from urllib.parse import urlparse
 
 import feedparser

@@ -18,6 +18,8 @@ class Settings:
     interval: timedelta
     run_once: bool
     deepseek_api_key: str
+    elsevier_api_key: str | None = None
+    elsevier_inst_token: str | None = None
 
 
 _INTERVAL_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[smhdw])$")
@@ -69,6 +71,8 @@ def build_settings(
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise SettingsError("Missing DEEPSEEK_API_KEY. Add it to .env or the environment.")
+    elsevier_key = os.getenv("ELSEVIER_API_KEY")
+    elsevier_inst_token = os.getenv("ELSEVIER_INST_TOKEN")
 
     interval = parse_interval(interval_text, interval_seconds)
     return Settings(
@@ -77,4 +81,6 @@ def build_settings(
         interval=interval,
         run_once=run_once,
         deepseek_api_key=api_key,
+        elsevier_api_key=elsevier_key,
+        elsevier_inst_token=elsevier_inst_token,
     )

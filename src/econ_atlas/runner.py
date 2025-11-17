@@ -9,6 +9,8 @@ from typing import Callable
 from econ_atlas.ingest.feed import FeedClient
 from econ_atlas.models import ArticleRecord, JournalSource, NormalizedFeedEntry, TranslationRecord
 from econ_atlas.sources.list_loader import JournalListLoader
+from econ_atlas.sources.sciencedirect_api import ElsevierApiConfig, ScienceDirectApiClient
+from econ_atlas.sources.sciencedirect_enricher import ScienceDirectEnricher
 from econ_atlas.storage.json_store import JournalStore, StorageResult
 from econ_atlas.translate.base import Translator, TranslationResult, detect_language, skipped_translation
 
@@ -59,11 +61,19 @@ class Runner:
         feed_client: FeedClient,
         translator: Translator,
         store: JournalStore,
+        sciencedirect_api_key: str | None = None,
+        sciencedirect_inst_token: str | None = None,
     ) -> None:
         self._list_loader = list_loader
         self._feed_client = feed_client
         self._translator = translator
         self._store = store
+        api_client = None
+        if sciencedirect_api_key:
+            api_client = ScienceDirectApiClient(
+                ElsevierApiConfig(api_key=sciencedirect_api_key, inst_token=sciencedirect_inst_token)
+            )
+        self._scd_enricher = ScienceDirectEnricher(translator, api_client=api_client)
 
     def run(self) -> RunReport:
         start = datetime.now(timezone.utc)
@@ -100,6 +110,10 @@ class Runner:
 
         for entry in entries:
             record, attempted, failed = self._build_article(entry)
+            if journal.source_type == "sciencedirect":
+                record, extra_attempted, extra_failed = self._scd_enricher.enrich(record, entry)
+                attempted += extra_attempted
+                failed += extra_failed
             article_records.append(record)
             translation_attempts += attempted
             translation_failures += failed

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Protocol
@@ -12,19 +10,30 @@ from slugify import slugify
 
 from econ_atlas.models import JournalSource, NormalizedFeedEntry
 from econ_atlas.source_profiling.browser_fetcher import BrowserCredentials, PlaywrightFetcher
+from econ_atlas.source_profiling.browser_env import (
+    BASE_HEADERS,
+    BrowserLaunchConfigurationError as _BrowserLaunchConfigurationError,
+    browser_credentials_for_source,
+    browser_extract_script_for_source,
+    browser_headless_for_source,
+    browser_init_scripts_for_source,
+    browser_launch_overrides,
+    browser_local_storage_for_source,
+    browser_user_agent_for_source,
+    browser_user_data_dir_for_source,
+    browser_wait_selector_for_source,
+    build_browser_headers,
+    cookies_for_source,
+    local_storage_script,
+    rewrite_sciencedirect_url,
+    require_sciencedirect_profile,
+)
+
+BrowserLaunchConfigurationError = _BrowserLaunchConfigurationError
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_FETCH_TIMEOUT = 30.0
 DEFAULT_BROWSER_TIMEOUT = 45.0
-BASE_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
 
 
 class FeedFetcher(Protocol):
@@ -59,6 +68,8 @@ class BrowserHtmlFetcher(Protocol):
         trace_path: Path | None = None,
         debug_dir: Path | None = None,
         debug_label: str | None = None,
+        browser_channel: str | None = None,
+        executable_path: str | None = None,
     ) -> bytes:  # pragma: no cover - protocol hook
         ...
 
@@ -78,14 +89,6 @@ class JournalSampleReport:
     browser_attempts: int = 0
     browser_successes: int = 0
     browser_failures: int = 0
-
-
-class BrowserLaunchConfigurationError(RuntimeError):
-    """Raised when browser launch overrides are misconfigured."""
-
-    @property
-    def succeeded(self) -> bool:
-        return not self.errors
 
 
 @dataclass
@@ -231,20 +234,20 @@ class SampleCollector:
         if use_browser:
             fetcher = self._ensure_browser_fetcher()
             report.browser_attempts += 1
-            headers = _browser_headers(request.headers, source_type)
-            credentials = _browser_credentials_for_source(source_type)
-            user_agent = _browser_user_agent_for_source(source_type, headers)
-            wait_selector = _browser_wait_selector_for_source(source_type)
-            extract_script = _browser_extract_script_for_source(source_type)
-            init_scripts = _browser_init_scripts_for_source(source_type)
-            local_storage_entries = _browser_local_storage_for_source(source_type)
+            headers = build_browser_headers(request.headers, source_type)
+            credentials = browser_credentials_for_source(source_type)
+            user_agent = browser_user_agent_for_source(source_type, headers)
+            wait_selector = browser_wait_selector_for_source(source_type)
+            extract_script = browser_extract_script_for_source(source_type)
+            init_scripts = browser_init_scripts_for_source(source_type)
+            local_storage_entries = browser_local_storage_for_source(source_type)
             if local_storage_entries:
-                init_scripts.append(_local_storage_script(local_storage_entries))
-            user_data_dir = _browser_user_data_dir_for_source(source_type)
+                init_scripts.append(local_storage_script(local_storage_entries))
+            user_data_dir = browser_user_data_dir_for_source(source_type)
             if source_type == "sciencedirect":
-                user_data_dir = _require_sciencedirect_profile(user_data_dir)
-            headless = _browser_headless_for_source(source_type)
-            browser_channel, executable_path = _browser_launch_overrides(source_type)
+                user_data_dir = require_sciencedirect_profile(user_data_dir)
+            headless = browser_headless_for_source(source_type)
+            browser_channel, executable_path = browser_launch_overrides(source_type)
             trace_path = None
             if debug_dir and debug_label and source_type == "sciencedirect":
                 trace_path = debug_dir / f"{debug_label}.zip"
@@ -304,43 +307,6 @@ def _default_fetch_html(
     )
     response.raise_for_status()
     return response.content
-
-
-def _browser_headers(headers: dict[str, str], source_type: str) -> dict[str, str]:
-    merged = dict(BASE_HEADERS)
-    merged.update(headers)
-    extra = _browser_headers_from_env(source_type)
-    if extra:
-        merged.update(extra)
-    return merged
-
-
-def _browser_headers_from_env(source_type: str) -> dict[str, str] | None:
-    env_key = f"{source_type.upper()}_BROWSER_HEADERS"
-    raw = os.getenv(env_key)
-    if not raw:
-        return None
-    parsed = _parse_header_mapping(raw)
-    return parsed or None
-
-
-def _browser_user_agent_for_source(source_type: str, headers: dict[str, str]) -> str:
-    env_key = f"{source_type.upper()}_BROWSER_USER_AGENT"
-    env_value = os.getenv(env_key)
-    if env_value:
-        return env_value.strip()
-    return headers.get("User-Agent", BASE_HEADERS["User-Agent"])
-
-
-def _browser_credentials_for_source(source_type: str) -> BrowserCredentials | None:
-    prefix = source_type.upper()
-    username = os.getenv(f"{prefix}_BROWSER_USERNAME")
-    password = os.getenv(f"{prefix}_BROWSER_PASSWORD")
-    if username and password:
-        return BrowserCredentials(username=username, password=password)
-    return None
-
-
 def _build_filename(entry: NormalizedFeedEntry) -> str:
     raw = entry.entry_id or entry.link or entry.title
     candidate = slugify(raw or "entry", lowercase=True, separator="-")
@@ -364,13 +330,13 @@ def _build_fetch_request(journal: JournalSource, entry: NormalizedFeedEntry) -> 
     elif journal.source_type == "chicago":
         headers["Referer"] = "https://www.journals.uchicago.edu/"
     elif journal.source_type == "sciencedirect":
-        url = _rewrite_sciencedirect_url(url)
+        url = rewrite_sciencedirect_url(url)
         headers["Referer"] = "https://www.sciencedirect.com/"
     elif journal.source_type == "informs":
         headers["Referer"] = "https://pubsonline.informs.org/"
     elif journal.source_type == "nber":
         headers["Referer"] = "https://www.nber.org/"
-    cookies = _cookies_for_source(journal.source_type)
+    cookies = cookies_for_source(journal.source_type)
     return FetchRequest(url=url, headers=headers, cookies=cookies)
 
 
@@ -382,140 +348,6 @@ def _rewrite_wiley_url(url: str) -> str:
     if marker in clean and "/doi/abs/" not in clean and "/doi/full/" not in clean:
         return clean.replace(marker, "/doi/abs/", 1)
     return clean
-
-
-def _cookies_for_source(source_type: str) -> dict[str, str] | None:
-    env_key = COOKIE_ENV_MAP.get(source_type)
-    if not env_key:
-        return None
-    cookie_text = os.getenv(env_key)
-    if not cookie_text:
-        return None
-    return _parse_cookie_header(cookie_text)
-
-
-def _parse_cookie_header(value: str) -> dict[str, str]:
-    cookies: dict[str, str] = {}
-    cleaned = value.strip().strip("\"'")
-    for chunk in cleaned.split(";"):
-        trimmed = chunk.strip()
-        if not trimmed:
-            continue
-        if "=" not in trimmed:
-            continue
-        name, cookie_value = trimmed.split("=", 1)
-        cookies[name.strip().strip('\"\'')] = cookie_value.strip().strip('\"\'')
-    return cookies
-
-
-def _parse_header_mapping(value: str) -> dict[str, str]:
-    cleaned = value.strip()
-    if not cleaned:
-        return {}
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return {str(key): str(val) for key, val in data.items()}
-    except json.JSONDecodeError:
-        pass
-    return _parse_cookie_header(cleaned)
-
-
-def _browser_wait_selector_for_source(source_type: str) -> str | None:
-    return {
-        "sciencedirect": "script#__NEXT_DATA__",
-    }.get(source_type)
-
-
-def _rewrite_sciencedirect_url(url: str) -> str:
-    if "www.sciencedirect.com" not in url:
-        return url
-    marker = "/science/article/abs/pii/"
-    if marker in url:
-        return url.replace(marker, "/science/article/pii/", 1)
-    return url
-
-
-def _browser_extract_script_for_source(source_type: str) -> str | None:
-    return {
-        "sciencedirect": "window.__NEXT_DATA__",
-    }.get(source_type)
-
-
-def _browser_init_scripts_for_source(source_type: str) -> list[str]:
-    scripts: list[str] = []
-    if source_type == "sciencedirect":
-        scripts.append(_SCIDIR_FINGERPRINT_SCRIPT)
-    env_value = os.getenv(f"{source_type.upper()}_BROWSER_INIT_SCRIPT")
-    if env_value:
-        path = Path(env_value)
-        if path.exists():
-            scripts.append(path.read_text(encoding="utf-8"))
-        else:
-            scripts.append(env_value)
-    return scripts
-
-
-def _browser_local_storage_for_source(source_type: str) -> dict[str, str] | None:
-    raw = os.getenv(f"{source_type.upper()}_BROWSER_LOCAL_STORAGE")
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        LOGGER.warning("Invalid %s local storage JSON", source_type)
-        return None
-    if not isinstance(data, dict):
-        LOGGER.warning("Local storage JSON for %s must be an object", source_type)
-        return None
-    return {str(key): str(value) for key, value in data.items()}
-
-
-def _browser_user_data_dir_for_source(source_type: str) -> str | None:
-    return os.getenv(f"{source_type.upper()}_USER_DATA_DIR")
-
-
-def _local_storage_script(entries: dict[str, str]) -> str:
-    payload = json.dumps(entries)
-    return f"(() => {{ const entries = {payload}; Object.entries(entries).forEach(([k, v]) => localStorage.setItem(k, v)); }})()"
-
-
-def _browser_headless_for_source(source_type: str) -> bool:
-    value = os.getenv(f"{source_type.upper()}_BROWSER_HEADLESS")
-    if value is None:
-        return True
-    return value.strip().lower() not in {"0", "false", "no"}
-
-
-def _browser_launch_overrides(source_type: str) -> tuple[str | None, str | None]:
-    prefix = source_type.upper()
-    channel = os.getenv(f"{prefix}_BROWSER_CHANNEL")
-    executable = os.getenv(f"{prefix}_BROWSER_EXECUTABLE")
-    if channel and executable:
-        raise BrowserLaunchConfigurationError(
-            f"{source_type} browser sampling cannot set both {prefix}_BROWSER_CHANNEL and "
-            f"{prefix}_BROWSER_EXECUTABLE; choose one."
-        )
-    normalized_channel = channel.strip() if channel and channel.strip() else None
-    normalized_executable = None
-    if executable and executable.strip():
-        normalized_executable = str(Path(executable.strip()).expanduser())
-    return normalized_channel, normalized_executable
-
-
-def _require_sciencedirect_profile(user_data_dir: str | None) -> str:
-    if not user_data_dir:
-        raise RuntimeError(
-            "ScienceDirect sampling requires SCIENCEDIRECT_USER_DATA_DIR. "
-            "Run `uv run econ-atlas samples scd-session warmup` first."
-        )
-    path = Path(user_data_dir).expanduser()
-    if not path.exists():
-        raise RuntimeError(
-            f"ScienceDirect profile directory '{path}' is missing. "
-            "Re-run `samples scd-session warmup` to refresh the session."
-        )
-    return str(path)
 
 
 def _validate_sciencedirect_capture(
@@ -548,29 +380,4 @@ def _scd_debug_artifacts(debug_dir: Path | None, debug_label: str | None) -> lis
         debug_dir / f"{debug_label}.zip",
     ]
     return [str(path) for path in paths if path.exists()]
-
-
-_SCIDIR_FINGERPRINT_SCRIPT = """
-(() => {
-  Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-  window.chrome = window.chrome || { runtime: {} };
-  const originalPlugins = navigator.plugins;
-  Object.defineProperty(navigator, 'plugins', {
-    get: () => originalPlugins || [1, 2, 3],
-  });
-  const languages = navigator.languages;
-  Object.defineProperty(navigator, 'languages', {
-    get: () => languages || ['en-US', 'en']
-  });
-})();
-"""
-COOKIE_ENV_MAP = {
-    "wiley": "WILEY_COOKIES",
-    "oxford": "OXFORD_COOKIES",
-    "sciencedirect": "SCIENCEDIRECT_COOKIES",
-    "chicago": "CHICAGO_COOKIES",
-    "informs": "INFORMS_COOKIES",
-    "nber": "NBER_COOKIES",
-}
-
 PROTECTED_SOURCE_TYPES = frozenset({"wiley", "oxford", "sciencedirect", "chicago", "informs"})

@@ -17,6 +17,7 @@ dependencies = [
     "python-slugify>=8.0.4",
     "playwright>=1.45.0",
     "typer>=0.12.3",
+    "beautifulsoup4>=4.14.2",
 ]
 
 [project.scripts]
