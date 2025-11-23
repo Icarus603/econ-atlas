@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from typing import Any
 
+from pathlib import Path
 from bs4 import BeautifulSoup
 
 from econ_atlas.models import ArticleRecord, NormalizedFeedEntry
@@ -25,9 +28,124 @@ LOGGER = logging.getLogger(__name__)
 OXFORD_SOURCE_TYPE = "oxford"
 
 
+class PersistentOxfordSession:
+    """Maintain a single Playwright browser/context for Oxford during a run."""
+
+    def __init__(self) -> None:
+        self._playwright = None
+        self._browser = None
+        self._context = None
+
+    def ensure_session(
+        self,
+        *,
+        headers: dict[str, str],
+        cookies: dict[str, str] | None,
+        credentials,
+        user_agent: str,
+        wait_selector: str | None,
+        init_scripts: list[str] | None,
+        user_data_dir: str | None,
+        headless: bool,
+        browser_channel: str | None,
+        executable_path: str | None,
+    ) -> None:
+        if self._context:
+            return
+        # Pre-clean possible stale locks to reduce ProcessSingleton errors.
+        if user_data_dir:
+            for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                lock_path = Path(user_data_dir) / lock_name
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    LOGGER.debug("Could not remove pre-existing lock %s", lock_path)
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError(
+                "Playwright is not installed. Run `uv add playwright` and `uv run playwright install chromium`."
+            ) from exc
+
+        self._playwright = sync_playwright().start()
+        launch_kwargs: dict[str, Any] = {"headless": headless}
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
+        elif browser_channel:
+            launch_kwargs["channel"] = browser_channel
+
+        if user_data_dir:
+            context = self._playwright.chromium.launch_persistent_context(
+                user_data_dir,
+                **launch_kwargs,
+                user_agent=user_agent,
+                http_credentials=credentials.as_dict() if credentials else None,
+            )
+        else:
+            browser = self._playwright.chromium.launch(**launch_kwargs)
+            context_kwargs: dict[str, Any] = {"user_agent": user_agent}
+            if credentials:
+                context_kwargs["http_credentials"] = credentials.as_dict()
+            context = browser.new_context(**context_kwargs)
+            self._browser = browser
+
+        if headers:
+            context.set_extra_http_headers(headers)
+        if cookies:
+            context.add_cookies(
+                [
+                    {
+                        "name": name,
+                        "value": value,
+                        "domain": "academic.oup.com",
+                        "path": "/",
+                    }
+                    for name, value in cookies.items()
+                ]
+            )
+        if init_scripts:
+            for script in init_scripts:
+                context.add_init_script(script)
+
+        self._context = context
+
+    def fetch(self, url: str, wait_selector: str | None) -> str:
+        if not self._context:
+            raise RuntimeError("Session not initialized")
+        page = self._context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+        if wait_selector:
+            try:
+                page.wait_for_selector(wait_selector, timeout=45_000)
+            except Exception:  # noqa: BLE001
+                LOGGER.debug("wait selector %s timed out for %s", wait_selector, url)
+        html_text = page.content()
+        page.close()
+        return html_text
+
+    def close(self) -> None:
+        try:
+            if self._context:
+                self._context.close()
+            if self._browser:
+                self._browser.close()
+            if self._playwright:
+                self._playwright.stop()
+        except Exception:
+            LOGGER.debug("Failed to close Oxford session", exc_info=True)
+        finally:
+            self._context = None
+            self._browser = None
+            self._playwright = None
+
+
 class OxfordArticleFetcher:
     def __init__(self, fetcher: PlaywrightFetcher | None = None) -> None:
         self._fetcher = fetcher or PlaywrightFetcher()
+        self._session = PersistentOxfordSession()
 
     def fetch_html(self, url: str) -> str:
         headers = build_browser_headers({"Referer": "https://academic.oup.com/"}, OXFORD_SOURCE_TYPE)
@@ -42,35 +160,40 @@ class OxfordArticleFetcher:
         user_data_dir = browser_user_data_dir_for_source(OXFORD_SOURCE_TYPE)
         headless = browser_headless_for_source(OXFORD_SOURCE_TYPE)
         browser_channel, executable_path = browser_launch_overrides(OXFORD_SOURCE_TYPE)
-        html_bytes = self._fetcher.fetch(
-            url=url,
+        # Reuse a single context for all Oxford entries to reduce Cloudflare triggers.
+        self._session.ensure_session(
             headers=headers,
             cookies=cookies,
             credentials=credentials,
             user_agent=user_agent,
             wait_selector=wait_selector,
-            extract_script=None,
             init_scripts=init_scripts or None,
             user_data_dir=user_data_dir,
             headless=headless,
-            trace_path=None,
-            debug_dir=None,
-            debug_label=None,
             browser_channel=browser_channel,
             executable_path=executable_path,
         )
-        return html_bytes.decode("utf-8", errors="ignore")
+        html_text = self._session.fetch(url, wait_selector=wait_selector)
+        return html_text
 
 
 class OxfordEnricher:
     def __init__(self, fetcher: OxfordArticleFetcher | None = None) -> None:
         self._fetcher = fetcher or OxfordArticleFetcher()
+        throttle_env = os.getenv("OXFORD_THROTTLE_SECONDS")
+        try:
+            self._throttle_seconds = float(throttle_env) if throttle_env else 3.0
+        except ValueError:
+            self._throttle_seconds = 3.0
+        self._closed = False
 
     def enrich(self, record: ArticleRecord, entry: NormalizedFeedEntry) -> ArticleRecord:
         if record.authors:
             return record
         if not entry.link:
             return record
+        if self._throttle_seconds > 0:
+            time.sleep(self._throttle_seconds)
         try:
             html = self._fetcher.fetch_html(entry.link)
         except Exception as exc:  # noqa: BLE001
@@ -80,6 +203,14 @@ class OxfordEnricher:
         if not authors:
             return record
         return record.model_copy(update={"authors": authors})
+
+    def close(self) -> None:
+        if not self._closed:
+            try:
+                self._fetcher._session.close()  # type: ignore[attr-defined]
+            except Exception:
+                LOGGER.debug("Failed to close Oxford session", exc_info=True)
+            self._closed = True
 
 
 def _extract_authors(html: str) -> list[str]:

@@ -51,6 +51,21 @@ class PlaywrightFetcher:
         browser_channel: str | None = None,
         executable_path: str | None = None,
     ) -> bytes:
+        lock_files: list[Path] = []
+        if user_data_dir:
+            base = Path(user_data_dir)
+            lock_files = [
+                base / "SingletonLock",
+                base / "SingletonCookie",
+                base / "SingletonSocket",
+            ]
+            for lock_path in lock_files:
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    LOGGER.debug("Could not remove pre-existing lock %s", lock_path)
         try:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
             from playwright.sync_api import sync_playwright
@@ -157,6 +172,14 @@ document.body.appendChild(pre);
             raise TimeoutError(f"Timed out while waiting for {url} to finish loading") from exc
         except Exception:
             raise
+        finally:
+            for lock_path in lock_files:
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    LOGGER.debug("Could not remove lock %s", lock_path)
         return html_text.encode("utf-8")
 
 

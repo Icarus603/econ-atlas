@@ -115,6 +115,10 @@ class Runner:
                     )
                 )
         finished = datetime.now(timezone.utc)
+        try:
+            self._oxford_enricher.close()
+        except Exception:
+            LOGGER.debug("Failed to close Oxford enricher", exc_info=True)
         return RunReport(started_at=start, finished_at=finished, results=results, errors=errors)
 
     def _apply_filters(self, journals: list[JournalSource]) -> list[JournalSource]:
