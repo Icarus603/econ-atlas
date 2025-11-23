@@ -57,3 +57,22 @@ def failed_translation(error: str) -> TranslationResult:
         translated_at=now,
         error=error,
     )
+
+
+class NoOpTranslator(Translator):
+    """Translator that disables translation calls."""
+
+    def translate(
+        self,
+        text: str,
+        *,
+        source_language: str | None = None,
+        target_language: str = "zh",
+    ) -> TranslationResult:
+        now = datetime.now(timezone.utc)
+        return TranslationResult(
+            status="skipped",
+            translated_text=None,
+            translator=None,
+            translated_at=now,
+        )

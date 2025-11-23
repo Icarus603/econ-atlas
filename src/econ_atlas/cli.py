@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import csv
 import json
 import logging
@@ -19,21 +18,14 @@ from econ_atlas.ingest.feed import FeedClient
 from econ_atlas.runner import RunReport, Runner, run_scheduler
 from econ_atlas.source_profiling.sample_collector import SampleCollector, SampleCollectorReport
 from econ_atlas.source_profiling.sample_inventory import SourceInventory, build_inventory
-from econ_atlas.source_profiling.scd_session import (
-    DEFAULT_SCIENCEDIRECT_URL,
-    DEFAULT_WARMUP_PROFILE_DIR,
-    warmup_sciencedirect_profile,
-)
 from econ_atlas.sources.list_loader import ALLOWED_SOURCE_TYPES, JournalListLoader
-from econ_atlas.sources.sciencedirect_parser import parse_sciencedirect_fallback
 from econ_atlas.storage.json_store import JournalStore
+from econ_atlas.translate.base import NoOpTranslator
 from econ_atlas.translate.deepseek import DeepSeekTranslator
 
 app = typer.Typer(help="econ-atlas CLI")
 crawl_app = typer.Typer(help="Run RSS crawls")
 samples_app = typer.Typer(help="Collect HTML samples for source profiling")
-samples_parse_app = typer.Typer(help="Parse stored HTML samples")
-scd_session_app = typer.Typer(help="ScienceDirect session utilities")
 LOGGER = logging.getLogger(__name__)
 
 
@@ -53,10 +45,29 @@ def crawl(
         help="Explicit interval in seconds (overrides --interval).",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging."),
+    include_source: Optional[list[str]] = typer.Option(
+        None,
+        "--include-source",
+        "-s",
+        help="Only crawl journals matching the provided source types.",
+    ),
+    include_slug: Optional[list[str]] = typer.Option(
+        None,
+        "--include-slug",
+        "-j",
+        help="Only crawl the specified journal slugs (match data/<slug>.json).",
+    ),
+    skip_translation: bool = typer.Option(
+        False,
+        "--skip-translation",
+        help="Disable translation calls to speed up crawls.",
+    ),
 ) -> None:
     """Entry point for crawling journals."""
     _configure_logging(verbose)
     load_dotenv()
+    source_filter = _normalize_crawl_sources(include_source)
+    slug_filter = _normalize_slug_filter(include_slug)
     try:
         settings = build_settings(
             list_path=list_path,
@@ -64,6 +75,9 @@ def crawl(
             interval_text=interval,
             interval_seconds=interval_seconds,
             run_once=once,
+            include_slugs=slug_filter,
+            include_sources=source_filter,
+            skip_translation=skip_translation,
         )
     except SettingsError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
@@ -71,17 +85,26 @@ def crawl(
 
     if not settings.elsevier_api_key:
         typer.secho(
-            "[ScienceDirect] ELSEVIER_API_KEY is missing; falling back to DOM parser.",
+            "[ScienceDirect] ELSEVIER_API_KEY is missing; ScienceDirect enrichment will be skipped.",
             fg=typer.colors.YELLOW,
         )
 
+    translator: NoOpTranslator | DeepSeekTranslator
+    if settings.skip_translation:
+        translator = NoOpTranslator()
+    else:
+        assert settings.deepseek_api_key is not None
+        translator = DeepSeekTranslator(api_key=settings.deepseek_api_key)
     runner = Runner(
         list_loader=JournalListLoader(settings.list_path),
         feed_client=FeedClient(),
-        translator=DeepSeekTranslator(api_key=settings.deepseek_api_key),
+        translator=translator,
         store=JournalStore(settings.output_dir),
         sciencedirect_api_key=settings.elsevier_api_key,
         sciencedirect_inst_token=settings.elsevier_inst_token,
+        include_slugs=settings.include_slugs,
+        include_sources=settings.include_sources,
+        skip_translation=settings.skip_translation,
     )
 
     if settings.run_once:
@@ -95,8 +118,6 @@ def crawl(
 
 app.add_typer(crawl_app, name="crawl")
 app.add_typer(samples_app, name="samples")
-samples_app.add_typer(scd_session_app, name="scd-session")
-samples_app.add_typer(samples_parse_app, name="parse")
 
 
 def _print_report(report: RunReport) -> None:
@@ -194,148 +215,6 @@ def _print_sample_summary(report: SampleCollectorReport) -> None:
         )
 
 
-@samples_parse_app.command("sciencedirect")
-def parse_sciencedirect_samples(
-    input_dir: Path = typer.Option(
-        Path("samples/sciencedirect"),
-        "--input-dir",
-        "--input",
-        "-i",
-        exists=False,
-        file_okay=False,
-        dir_okay=True,
-        help="Directory that contains ScienceDirect HTML samples (defaults to samples/sciencedirect).",
-    ),
-    output: Optional[Path] = typer.Option(
-        None, "--output", "-o", help="Optional path to write the parsed JSON report."
-    ),
-) -> None:
-    """Parse ScienceDirect fallback HTML samples and report coverage."""
-
-    if not input_dir.exists():
-        typer.secho(f"Input directory not found: {input_dir}", fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-
-    html_files = sorted(input_dir.rglob("*.html"))
-    if not html_files:
-        typer.secho("No HTML samples found. Run `samples collect` or place files under the directory.", fg=typer.colors.YELLOW)
-        raise typer.Exit(code=1)
-
-    parsed_records: list[dict[str, object]] = []
-    parse_failures: list[tuple[Path, str]] = []
-    missing_records: list[tuple[Path, dict[str, str]]] = []
-
-    for html_path in html_files:
-        try:
-            html = html_path.read_text(encoding="utf-8")
-            article = parse_sciencedirect_fallback(html)
-        except Exception as exc:  # noqa: BLE001
-            parse_failures.append((html_path, str(exc)))
-            continue
-
-        record = article.to_dict()
-        record.update({"file": str(html_path), "journal": html_path.parent.name})
-        parsed_records.append(record)
-        missing = article.missing_fields()
-        if missing:
-            missing_records.append((html_path, missing))
-
-    if output:
-        payload = {
-            "parsed": parsed_records,
-            "failures": [{"file": str(path), "error": error} for path, error in parse_failures],
-        }
-        output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    summary = (
-        f"Files: {len(html_files)} | parsed: {len(parsed_records)} | failures: {len(parse_failures)}"
-        f" | missing-fields: {len(missing_records)}"
-    )
-    color = typer.colors.GREEN
-    if parse_failures or missing_records:
-        color = typer.colors.YELLOW
-    if parse_failures:
-        color = typer.colors.RED
-    typer.secho(summary, fg=color)
-
-    if parse_failures:
-        typer.secho("Parse failures:", fg=typer.colors.RED)
-        for path, error in parse_failures:
-            typer.secho(f"  - {path}: {error}", fg=typer.colors.RED)
-
-    if missing_records:
-        typer.secho("Missing fields detected:", fg=typer.colors.YELLOW)
-        for path, missing in missing_records:
-            details = ", ".join(f"{field}={reason}" for field, reason in missing.items())
-            typer.secho(f"  - {path}: {details}", fg=typer.colors.YELLOW)
-
-    if parse_failures or missing_records:
-        raise typer.Exit(code=1)
-
-
-@scd_session_app.command("warmup")
-def warmup_sciencedirect_session(
-    profile_dir: Path = typer.Option(
-        DEFAULT_WARMUP_PROFILE_DIR,
-        exists=False,
-        dir_okay=True,
-        file_okay=False,
-        writable=True,
-        resolve_path=True,
-        help="Directory that stores the persistent Chromium profile.",
-    ),
-    pii: Optional[str] = typer.Option(
-        None,
-        help="Optional ScienceDirect PII (e.g., S0047272725001975) that will be opened in the warmup browser.",
-    ),
-    article_url: Optional[str] = typer.Option(
-        None,
-        "--url",
-        help="Open a specific ScienceDirect article URL instead of the default homepage.",
-    ),
-    export_local_storage: Optional[Path] = typer.Option(
-        None,
-        writable=True,
-        resolve_path=True,
-        help="Path to write the current localStorage JSON (copy the file contents into SCIENCEDIRECT_BROWSER_LOCAL_STORAGE).",
-    ),
-) -> None:
-    """Launch a headed Chromium session so the user can complete ScienceDirect challenges."""
-    load_dotenv(dotenv_path=".env", override=True)
-    if pii and article_url:
-        raise typer.BadParameter("Use either --pii or --url, not both.")
-    target_url = article_url or DEFAULT_SCIENCEDIRECT_URL
-    if pii:
-        target_url = f"https://www.sciencedirect.com/science/article/pii/{pii}"
-
-    typer.echo("Launching Chromium with a persistent profile. A browser window will appear shortly.")
-    typer.echo(f"Please complete any Cloudflare or login challenges at: {target_url}")
-
-    def _wait_for_user() -> None:
-        typer.prompt(
-            "Press ENTER here after the page loads without the Cloudflare 'Please wait' screen",
-            default="",
-            show_default=False,
-        )
-
-    try:
-        warmup_sciencedirect_profile(
-            profile_dir=profile_dir,
-            target_url=target_url,
-            wait_callback=_wait_for_user,
-            export_local_storage=export_local_storage,
-            user_agent=os.getenv("SCIENCEDIRECT_BROWSER_USER_AGENT"),
-        )
-    except RuntimeError as exc:
-        typer.secho(str(exc), fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
-
-    typer.secho("Warmup complete!", fg=typer.colors.GREEN)
-    typer.echo(f"Profile directory: {profile_dir}")
-    typer.echo("Set SCIENCEDIRECT_USER_DATA_DIR to this path in your .env file.")
-    if export_local_storage:
-        typer.echo(f"LocalStorage JSON saved to {export_local_storage.resolve()}")
-        typer.echo("Copy its contents into SCIENCEDIRECT_BROWSER_LOCAL_STORAGE if needed.")
 @samples_app.command("import")
 def import_sample(
     source_type: str = typer.Argument(..., help="Source type folder (e.g., sciencedirect)."),
@@ -415,3 +294,22 @@ def _render_inventory(inventories: list[SourceInventory], fmt: str, pretty: bool
 
     payload = [source.to_dict() for source in inventories]
     return json.dumps(payload, indent=2 if pretty else None)
+
+
+def _normalize_crawl_sources(include_source: Optional[list[str]]) -> set[str] | None:
+    if not include_source:
+        # Default: skip sources that need browser/session (Wiley/Chicago/INFORMS)
+        return {value for value in ALLOWED_SOURCE_TYPES if value not in {"wiley", "chicago", "informs"}}
+    normalized = {value.strip().lower() for value in include_source if value and value.strip()}
+    invalid = normalized - ALLOWED_SOURCE_TYPES
+    if invalid:
+        invalid_str = ", ".join(sorted(invalid))
+        raise typer.BadParameter(f"Invalid source types: {invalid_str}")
+    return normalized or None
+
+
+def _normalize_slug_filter(include_slug: Optional[list[str]]) -> set[str] | None:
+    if not include_slug:
+        return None
+    normalized = {value.strip().lower() for value in include_slug if value and value.strip()}
+    return normalized or None

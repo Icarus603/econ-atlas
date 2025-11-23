@@ -9,6 +9,7 @@ from typing import Callable
 from econ_atlas.ingest.feed import FeedClient
 from econ_atlas.models import ArticleRecord, JournalSource, NormalizedFeedEntry, TranslationRecord
 from econ_atlas.sources.list_loader import JournalListLoader
+from econ_atlas.sources.oxford_enricher import OxfordEnricher
 from econ_atlas.sources.sciencedirect_api import ElsevierApiConfig, ScienceDirectApiClient
 from econ_atlas.sources.sciencedirect_enricher import ScienceDirectEnricher
 from econ_atlas.storage.json_store import JournalStore, StorageResult
@@ -63,17 +64,24 @@ class Runner:
         store: JournalStore,
         sciencedirect_api_key: str | None = None,
         sciencedirect_inst_token: str | None = None,
+        include_slugs: set[str] | None = None,
+        include_sources: set[str] | None = None,
+        skip_translation: bool = False,
     ) -> None:
         self._list_loader = list_loader
         self._feed_client = feed_client
         self._translator = translator
         self._store = store
+        self._include_slugs = include_slugs
+        self._include_sources = include_sources
+        self._skip_translation = skip_translation
         api_client = None
         if sciencedirect_api_key:
             api_client = ScienceDirectApiClient(
                 ElsevierApiConfig(api_key=sciencedirect_api_key, inst_token=sciencedirect_inst_token)
             )
         self._scd_enricher = ScienceDirectEnricher(translator, api_client=api_client)
+        self._oxford_enricher = OxfordEnricher()
 
     def run(self) -> RunReport:
         start = datetime.now(timezone.utc)
@@ -81,6 +89,13 @@ class Runner:
         errors: list[str] = []
         journals = self._list_loader.load()
         LOGGER.info("Loaded %s journals", len(journals))
+        journals = self._apply_filters(journals)
+        LOGGER.info("After filters: %s journals", len(journals))
+        if not journals:
+            message = "No journals matched the requested filters"
+            LOGGER.warning(message)
+            finished = datetime.now(timezone.utc)
+            return RunReport(started_at=start, finished_at=finished, results=[], errors=[message])
         for journal in journals:
             try:
                 result = self._process_journal(journal)
@@ -102,6 +117,14 @@ class Runner:
         finished = datetime.now(timezone.utc)
         return RunReport(started_at=start, finished_at=finished, results=results, errors=errors)
 
+    def _apply_filters(self, journals: list[JournalSource]) -> list[JournalSource]:
+        filtered = journals
+        if self._include_sources:
+            filtered = [journal for journal in filtered if journal.source_type in self._include_sources]
+        if self._include_slugs:
+            filtered = [journal for journal in filtered if journal.slug in self._include_slugs]
+        return filtered
+
     def _process_journal(self, journal: JournalSource) -> JournalRunResult:
         entries = self._feed_client.fetch(journal.rss_url)
         article_records: list[ArticleRecord] = []
@@ -114,6 +137,8 @@ class Runner:
                 record, extra_attempted, extra_failed = self._scd_enricher.enrich(record, entry)
                 attempted += extra_attempted
                 failed += extra_failed
+            elif journal.source_type == "oxford":
+                record = self._oxford_enricher.enrich(record, entry)
             article_records.append(record)
             translation_attempts += attempted
             translation_failures += failed
@@ -140,7 +165,14 @@ class Runner:
         attempted = 0
         failures = 0
 
-        if not summary:
+        if self._skip_translation:
+            translation_result = TranslationResult(
+                status="skipped",
+                translated_text=None,
+                translator=None,
+                translated_at=datetime.now(timezone.utc),
+            )
+        elif not summary:
             translation_result = skipped_translation(summary)
         elif language and language.startswith("zh"):
             translation_result = skipped_translation(summary)

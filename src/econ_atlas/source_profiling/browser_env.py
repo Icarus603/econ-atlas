@@ -203,13 +203,11 @@ def browser_launch_overrides(source_type: str) -> tuple[str | None, str | None]:
 def require_sciencedirect_profile(user_data_dir: str | None) -> str:
     if not user_data_dir:
         raise RuntimeError(
-            "ScienceDirect sampling requires SCIENCEDIRECT_USER_DATA_DIR. "
-            "Run `uv run econ-atlas samples scd-session warmup` first."
+            "ScienceDirect sampling requires SCIENCEDIRECT_USER_DATA_DIR; provide a valid persistent profile path."
         )
     path = Path(user_data_dir).expanduser()
     if not path.exists():
         raise RuntimeError(
-            f"ScienceDirect profile directory '{path}' is missing. "
-            "Re-run `samples scd-session warmup` to refresh the session."
+            f"ScienceDirect profile directory '{path}' is missing. Provide a valid profile directory before sampling."
         )
     return str(path)

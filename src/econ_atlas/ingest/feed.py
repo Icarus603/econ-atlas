@@ -216,26 +216,52 @@ def strip(value: str) -> str:
 
 
 def _normalize_authors(entry: Any) -> list[str]:
-    if "authors" in entry and isinstance(entry["authors"], Sequence):
+    authors_field = entry.get("authors")
+    if isinstance(authors_field, Sequence) and not isinstance(authors_field, (str, bytes)):
         normalized = []
-        for author_obj in entry["authors"]:
+        for author_obj in authors_field:
             if isinstance(author_obj, dict):
                 name = author_obj.get("name")
                 if name:
                     normalized.append(name.strip())
             elif isinstance(author_obj, str):
                 normalized.append(author_obj.strip())
-        return [name for name in normalized if name]
-    author_text = strip(entry.get("author", "") or entry.get("creator", "") or "")
-    if not author_text:
-        return []
-    if ";" in author_text:
-        parts = [part.strip() for part in author_text.split(";")]
-    elif "," in author_text:
-        parts = [part.strip() for part in author_text.split(",")]
-    else:
-        parts = [author_text]
-    return [part for part in parts if part]
+        normalized = [name for name in normalized if name]
+        if normalized:
+            return normalized
+
+    for key in ("author", "creator", "dc_creator", "dc:creator"):
+        raw_value = entry.get(key)
+        if not raw_value:
+            continue
+        normalized = _coerce_author_values(raw_value)
+        if normalized:
+            return normalized
+    return []
+
+
+def _coerce_author_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if ";" in text:
+            candidates = [part.strip() for part in text.split(";")]
+        elif "," in text:
+            candidates = [part.strip() for part in text.split(",")]
+        else:
+            candidates = [text]
+        return [candidate for candidate in candidates if candidate]
+    if isinstance(value, Sequence):
+        results: list[str] = []
+        for item in value:
+            results.extend(_coerce_author_values(item))
+        return results
+    if isinstance(value, dict):
+        name = value.get("name") or value.get("dc:creator") or value.get("$")
+        if isinstance(name, str) and name.strip():
+            return [name.strip()]
+    return []
 
 
 def _parse_datetime(entry: Any) -> datetime | None:

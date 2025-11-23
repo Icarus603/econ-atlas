@@ -372,7 +372,7 @@ def test_sciencedirect_requires_profile(monkeypatch: pytest.MonkeyPatch, tmp_pat
         browser_fetcher=browser_fetcher,
     )
     report = collector.collect([journal], limit_per_journal=1, output_dir=tmp_path)
-    assert "scd-session warmup" in report.results[0].errors[0]
+    assert "ScienceDirect sampling requires SCIENCEDIRECT_USER_DATA_DIR" in report.results[0].errors[0]
 
 
 def test_sciencedirect_missing_json_marks_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

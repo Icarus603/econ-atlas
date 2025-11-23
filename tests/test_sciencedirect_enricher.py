@@ -83,31 +83,23 @@ def test_api_enrich_updates_fields() -> None:
     assert len(translator.calls) == 1
 
 
-def test_api_failure_falls_back_to_dom() -> None:
-    html = (FIXTURE_DIR / "fallback_full.html").read_text(encoding="utf-8")
-    fetcher = StubFetcher(html)
+def test_api_failure_skips_enrichment() -> None:
     translator = StubTranslator()
     api_client = cast(Any, StubApiClient(ScienceDirectApiError("boom")))
-    enricher = ScienceDirectEnricher(translator, api_client=api_client, fetcher=fetcher)
+    enricher = ScienceDirectEnricher(translator, api_client=api_client)
 
     record, attempts, failures = enricher.enrich(_base_record(), _entry())
 
-    assert attempts == 1
+    assert attempts == 0
     assert failures == 0
-    assert record.title == "Crowding out crowd support?"
-    assert record.authors == ["Alice Example", "Bob Example"]
-    assert record.published_at is not None
-    assert record.abstract_original is not None
-    assert record.abstract_original.startswith("Paragraph one")
-    assert record.abstract_zh is not None
-    assert len(translator.calls) == 1
-    assert record.translation.status == "success"
+    assert record.abstract_original == _base_record().abstract_original
+    assert len(translator.calls) == 0
 
 
 def test_dom_enrich_skips_when_fetch_fails() -> None:
     fetcher = StubFetcher(RuntimeError("missing profile"))
     translator = StubTranslator()
-    enricher = ScienceDirectEnricher(translator, api_client=None, fetcher=fetcher)
+    enricher = ScienceDirectEnricher(translator, api_client=None)
 
     base_record = _base_record()
     record, attempts, failures = enricher.enrich(base_record, _entry())
@@ -122,7 +114,7 @@ def test_dom_enrich_does_not_retranslate_same_abstract() -> None:
     html = (FIXTURE_DIR / "fallback_full.html").read_text(encoding="utf-8")
     fetcher = StubFetcher(html)
     translator = StubTranslator()
-    enricher = ScienceDirectEnricher(translator, api_client=None, fetcher=fetcher)
+    enricher = ScienceDirectEnricher(translator, api_client=None)
 
     existing = _base_record().model_copy(
         update={
@@ -139,6 +131,35 @@ def test_dom_enrich_does_not_retranslate_same_abstract() -> None:
     assert failures == 0
     assert record.abstract_original == existing.abstract_original
     assert translator.calls == []
+
+
+def test_api_enrich_handles_creator_objects() -> None:
+    payload = cast(
+        dict[str, Any],
+        {
+            "full-text-retrieval-response": {
+                "coredata": {
+                    "dc:title": "API Title",
+                    "dc:description": "API body",
+                    "prism:coverDate": "2025-12-31",
+                    "dc:creator": [
+                        {"$": "Alice Example", "@seq": "1"},
+                        {"$": "Bob Example", "@seq": "2"},
+                    ],
+                }
+            }
+        },
+    )
+    api_client = cast(Any, StubApiClient(payload))
+    translator = StubTranslator()
+    enricher = ScienceDirectEnricher(translator, api_client=api_client)
+
+    record, attempts, failures = enricher.enrich(_base_record(), _entry())
+
+    assert record.authors == ["Alice Example", "Bob Example"]
+    assert attempts == 1
+    assert failures == 0
+    assert len(translator.calls) == 1
 class StubApiClient:
     def __init__(self, payload: dict[str, Any] | Exception):
         self.payload = payload

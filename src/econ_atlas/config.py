@@ -17,9 +17,12 @@ class Settings:
     output_dir: Path
     interval: timedelta
     run_once: bool
-    deepseek_api_key: str
+    deepseek_api_key: str | None
     elsevier_api_key: str | None = None
     elsevier_inst_token: str | None = None
+    include_slugs: set[str] | None = None
+    include_sources: set[str] | None = None
+    skip_translation: bool = False
 
 
 _INTERVAL_RE = re.compile(r"^(?P<value>\d+)(?P<unit>[smhdw])$")
@@ -61,6 +64,9 @@ def build_settings(
     interval_text: str | None,
     interval_seconds: int | None,
     run_once: bool,
+    include_slugs: set[str] | None,
+    include_sources: set[str] | None,
+    skip_translation: bool,
 ) -> Settings:
     """Validate CLI inputs and construct runtime settings."""
     list_path = list_path.expanduser()
@@ -69,7 +75,7 @@ def build_settings(
         raise SettingsError(f"CSV list not found: {list_path}")
 
     api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
+    if not skip_translation and not api_key:
         raise SettingsError("Missing DEEPSEEK_API_KEY. Add it to .env or the environment.")
     elsevier_key = os.getenv("ELSEVIER_API_KEY")
     elsevier_inst_token = os.getenv("ELSEVIER_INST_TOKEN")
@@ -83,4 +89,7 @@ def build_settings(
         deepseek_api_key=api_key,
         elsevier_api_key=elsevier_key,
         elsevier_inst_token=elsevier_inst_token,
+        include_slugs=include_slugs,
+        include_sources=include_sources,
+        skip_translation=skip_translation,
     )
