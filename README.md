@@ -59,6 +59,7 @@ Oxford 特殊说明：
 - 通过复用单个 Playwright 实例 + UA/headers + 每篇 3s 节流来降低 Cloudflare 触发。
 - `OXFORD_COOKIES` 可留空；若被挑战，可预热专用 profile 或临时粘贴一次 fresh cookie。
 - 如需调整节流，设置 `OXFORD_THROTTLE_SECONDS`（默认 3）。
+- 若站点继续出现 Cloudflare/Google reCAPTCHA（九宫格/“我不是机器人”），目前无可行的自动化绕过：需要在相同浏览器 profile 下人工完成验证后再运行 crawler，并保持低频抓取（单实例串行 + 节流），必要时换更干净的网络。
 
 ## ScienceDirect 现状
 - 2025-11 的站点观测仍表明页面缺失 `__NEXT_DATA__`，因此 **crawler 仅使用 Elsevier Article Retrieval API**。如果缺少 API key，将跳过 ScienceDirect 丰富，摘要可能缺失。
