@@ -1,5 +1,5 @@
 [project]
-name = "econ-atlas"
+name = "econatlas"
 version = "0.1.0"
 description = "CLI crawler for economics journals with DeepSeek translations"
 readme = "README.md"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-econ-atlas = "econ_atlas.cli:app"
+econ-atlas = "econatlas.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.9.9,<0.10.0"]

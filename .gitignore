@@ -1,6 +1,11 @@
 .DS_Store
 .env
 .venv/
+uv.lock
+mypy.ini
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 data/
 samples/
 .cache/
