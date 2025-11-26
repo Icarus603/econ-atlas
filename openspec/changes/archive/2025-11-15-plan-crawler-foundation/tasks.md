@@ -1,8 +1,0 @@
-- [x] Document project context in `openspec/project.md` (purpose, tech stack, workflows) so future contributors share the same baseline.
-- [x] Scaffold Python package structure (`src/econ_atlas/`), configure `uv` project metadata, and add dependencies (`typer`, `feedparser`, `requests`, `python-dotenv`, `langdetect`, `pydantic`, `APScheduler` if used).
-- [x] Implement configuration + CLI entry point: load `.env`, validate `DEEPSEEK_API_KEY`, support `crawl` command with `--once` (default) and `--interval` overrides, plus `--list-path` / `--output-dir`.
-- [x] Build CSV reader that loads `list.csv`, normalizes journal metadata (slug, rss url, notes), and skips rows without RSS links while logging warnings.
-- [x] Implement ingestion pipeline: fetch RSS feed, normalize items, detect language, call DeepSeek translator for non-Chinese abstracts, and attach translation metadata/failure reasons.
-- [x] Implement storage layer that writes to `data/<journal_slug>.json`, maintains append-only history, deduplicates by canonical feed ID/link, and performs atomic writes.
-- [x] Add scheduling support so the CLI can run continuously with a configurable period (default 7 days) while still supporting manual fallback executions.
-- [x] Cover the new code with tests (unit for translators/storage, integration smoke for CLI) and wire commands into CI: `uv run ruff check . --fix`, `uv run mypy .`, `uv run pytest -q`.
