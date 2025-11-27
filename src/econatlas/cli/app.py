@@ -18,12 +18,11 @@ import typer
 from dotenv import load_dotenv
 from slugify import slugify
 
-from importlib import import_module
 
 from econatlas.config import SettingsError, build_settings
 from econatlas.models import ArticleRecord, TranslationRecord, JournalSource
 from econatlas.feeds import FeedClient, JournalListLoader, ALLOWED_SOURCE_TYPES
-from econatlas.crawlers import ScienceDirect爬虫, Oxford爬虫, Cambridge爬虫, CNKI爬虫
+from econatlas.crawlers import ScienceDirect爬虫, Oxford爬虫, Cambridge爬虫, CNKI爬虫, NBER爬虫
 
 from econatlas.storage import JournalStore
 from econatlas.translation import (
@@ -37,7 +36,6 @@ from econatlas.translation import (
 from econatlas.samples import (
     SampleCollector,
     SampleCollectorReport,
-    BrowserLaunchConfigurationError,
     build_inventory,
 )
 
@@ -429,6 +427,7 @@ def _run_once(
     oxford_crawler = Oxford爬虫(feed_client)
     cambridge_crawler = Cambridge爬虫(feed_client)
     cnki_crawler = CNKI爬虫(feed_client)
+    nber_crawler = NBER爬虫(feed_client)
 
     for journal in journals:
         try:
@@ -438,6 +437,7 @@ def _run_once(
                 oxford_crawler=oxford_crawler,
                 cambridge_crawler=cambridge_crawler,
                 cnki_crawler=cnki_crawler,
+                nber_crawler=nber_crawler,
                 feed_client=feed_client,
             )
             translated_records, attempts, failures = _translate_records(records, translator, skip_translation)
@@ -482,6 +482,7 @@ def _crawl_with_dispatch(
     oxford_crawler: Any,
     cambridge_crawler: Any,
     cnki_crawler: Any,
+    nber_crawler: Any,
     feed_client: FeedClient,
 ) -> list[ArticleRecord]:
     if journal.source_type == "cnki":
@@ -492,6 +493,8 @@ def _crawl_with_dispatch(
         return cast(list[ArticleRecord], oxford_crawler.crawl(journal))
     if journal.source_type == "cambridge":
         return cast(list[ArticleRecord], cambridge_crawler.crawl(journal))
+    if journal.source_type == "nber":
+        return cast(list[ArticleRecord], nber_crawler.crawl(journal))
     # 其他来源：仅用 FeedClient 构建基础记录
     entries = feed_client.fetch(journal.rss_url)
     records: list[ArticleRecord] = []

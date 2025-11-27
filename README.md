@@ -47,6 +47,7 @@
   - `1.1_ScienceDirect_爬虫.py`：feed 拉取 + Elsevier API 增强（标题/作者/摘要）+ 占位翻译。
   - `1.2_Oxford_爬虫.py`：RSS 后浏览器补全作者（持久会话降低 Cloudflare），占位翻译。
   - `1.3_Cambridge_爬虫.py`：直接用 feed 数据，无额外增强。
+  - `1.4_NBER_爬虫.py`：直接用 feed 数据，无额外增强。
 - `src/econatlas/2_enrichers/`
   - `2.1_ScienceDirect_增强器.py`：Elsevier Article Retrieval API 封装，按 PII 合并作者/摘要/日期。
   - `2.2_Oxford_增强器.py`：Playwright 抓取 Oxford 页，解析 JSON-LD 与 meta 作者。

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from importlib import import_module
 
 from typer.testing import CliRunner
+from pytest import MonkeyPatch
 
 from econatlas.cli.app import RunReport, app
 from econatlas.models import JournalSource
@@ -14,7 +15,7 @@ runner = CliRunner()
 cli_app = import_module("econatlas.cli.app")
 
 
-def test_crawl_publisher_does_not_trigger_parent_callback(monkeypatch: object) -> None:
+def test_crawl_publisher_does_not_trigger_parent_callback(monkeypatch: MonkeyPatch) -> None:
     """Ensure `crawl publisher ...`不会先跑父 callback 导致抓取全部来源。"""
     calls: list[list[str]] = []
 
