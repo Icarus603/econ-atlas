@@ -22,7 +22,16 @@ from slugify import slugify
 from econatlas.config import SettingsError, build_settings
 from econatlas.models import ArticleRecord, TranslationRecord, JournalSource
 from econatlas.feeds import FeedClient, JournalListLoader, ALLOWED_SOURCE_TYPES
-from econatlas.crawlers import ScienceDirect爬虫, Oxford爬虫, Cambridge爬虫, CNKI爬虫, NBER爬虫
+from econatlas.crawlers import (
+    ScienceDirect爬虫,
+    Oxford爬虫,
+    Cambridge爬虫,
+    CNKI爬虫,
+    NBER爬虫,
+    Wiley爬虫,
+    Chicago爬虫,
+    Informs爬虫,
+)
 
 from econatlas.storage import JournalStore
 from econatlas.translation import (
@@ -428,6 +437,9 @@ def _run_once(
     cambridge_crawler = Cambridge爬虫(feed_client)
     cnki_crawler = CNKI爬虫(feed_client)
     nber_crawler = NBER爬虫(feed_client)
+    wiley_crawler = Wiley爬虫(feed_client)
+    chicago_crawler = Chicago爬虫(feed_client)
+    informs_crawler = Informs爬虫(feed_client)
 
     for journal in journals:
         try:
@@ -438,6 +450,9 @@ def _run_once(
                 cambridge_crawler=cambridge_crawler,
                 cnki_crawler=cnki_crawler,
                 nber_crawler=nber_crawler,
+                wiley_crawler=wiley_crawler,
+                chicago_crawler=chicago_crawler,
+                informs_crawler=informs_crawler,
                 feed_client=feed_client,
             )
             translated_records, attempts, failures = _translate_records(records, translator, skip_translation)
@@ -483,6 +498,9 @@ def _crawl_with_dispatch(
     cambridge_crawler: Any,
     cnki_crawler: Any,
     nber_crawler: Any,
+    wiley_crawler: Any,
+    chicago_crawler: Any,
+    informs_crawler: Any,
     feed_client: FeedClient,
 ) -> list[ArticleRecord]:
     if journal.source_type == "cnki":
@@ -495,6 +513,12 @@ def _crawl_with_dispatch(
         return cast(list[ArticleRecord], cambridge_crawler.crawl(journal))
     if journal.source_type == "nber":
         return cast(list[ArticleRecord], nber_crawler.crawl(journal))
+    if journal.source_type == "wiley":
+        return cast(list[ArticleRecord], wiley_crawler.crawl(journal))
+    if journal.source_type == "chicago":
+        return cast(list[ArticleRecord], chicago_crawler.crawl(journal))
+    if journal.source_type == "informs":
+        return cast(list[ArticleRecord], informs_crawler.crawl(journal))
     # 其他来源：仅用 FeedClient 构建基础记录
     entries = feed_client.fetch(journal.rss_url)
     records: list[ArticleRecord] = []

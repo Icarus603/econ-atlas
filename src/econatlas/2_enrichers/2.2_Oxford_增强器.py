@@ -39,6 +39,7 @@ class PersistentOxfordSession:
         self._playwright = None
         self._browser = None
         self._context = None
+        self._throttle_seconds = _throttle_seconds_from_env()
 
     def ensure_session(
         self,
@@ -119,6 +120,8 @@ class PersistentOxfordSession:
         if not self._context:
             raise RuntimeError("会话未初始化")
         page = self._context.new_page()
+        if self._throttle_seconds > 0:
+            time.sleep(self._throttle_seconds)
         page.goto(url, wait_until="domcontentloaded", timeout=45_000)
         if wait_selector:
             try:
@@ -213,6 +216,18 @@ class OxfordEnricher:
             except Exception:
                 LOGGER.debug("关闭 Oxford 会话失败", exc_info=True)
             self._closed = True
+
+
+def _throttle_seconds_from_env() -> float:
+    raw = os.getenv("OXFORD_THROTTLE_SECONDS")
+    if not raw:
+        return 0.0
+    try:
+        value = float(raw)
+        return value if value > 0 else 0.0
+    except ValueError:
+        LOGGER.warning("Invalid OXFORD_THROTTLE_SECONDS value: %s", raw)
+        return 0.0
 
 
 def _extract_authors(html: str) -> list[str]:

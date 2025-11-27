@@ -66,8 +66,7 @@ def build_browser_headers(headers: dict[str, str], source_type: str) -> dict[str
 
 
 def browser_headers_from_env(source_type: str) -> dict[str, str] | None:
-    env_key = f"{source_type.upper()}_BROWSER_HEADERS"
-    raw = os.getenv(env_key)
+    raw = os.getenv("BROWSER_HEADERS")
     if not raw:
         return None
     parsed = parse_header_mapping(raw)
@@ -75,8 +74,7 @@ def browser_headers_from_env(source_type: str) -> dict[str, str] | None:
 
 
 def browser_user_agent_for_source(source_type: str, headers: dict[str, str]) -> str:
-    env_key = f"{source_type.upper()}_BROWSER_USER_AGENT"
-    env_value = os.getenv(env_key)
+    env_value = os.getenv("BROWSER_USER_AGENT")
     if env_value:
         return env_value.strip()
     return headers.get("User-Agent", BASE_HEADERS["User-Agent"])
@@ -182,23 +180,25 @@ def local_storage_script(entries: dict[str, str]) -> str:
 
 
 def browser_user_data_dir_for_source(source_type: str) -> str | None:
-    return os.getenv(f"{source_type.upper()}_USER_DATA_DIR")
+    env_value = os.getenv("BROWSER_USER_DATA_DIR")
+    if env_value:
+        return env_value
+    return None
 
 
 def browser_headless_for_source(source_type: str) -> bool:
-    value = os.getenv(f"{source_type.upper()}_BROWSER_HEADLESS")
+    value = os.getenv("BROWSER_HEADLESS")
     if value is None:
         return True
     return value.strip().lower() not in {"0", "false", "no"}
 
 
 def browser_launch_overrides(source_type: str) -> tuple[str | None, str | None]:
-    prefix = source_type.upper()
-    channel = os.getenv(f"{prefix}_BROWSER_CHANNEL")
-    executable = os.getenv(f"{prefix}_BROWSER_EXECUTABLE")
+    channel = os.getenv("BROWSER_CHANNEL")
+    executable = os.getenv("BROWSER_EXECUTABLE")
     if channel and executable:
         raise BrowserLaunchConfigurationError(
-            f"{source_type} 同时配置 {prefix}_BROWSER_CHANNEL 与 {prefix}_BROWSER_EXECUTABLE，需二选一。"
+            f"{source_type} 同时配置 BROWSER_CHANNEL 与 BROWSER_EXECUTABLE，需二选一。"
         )
     normalized_channel = channel.strip() if channel and channel.strip() else None
     normalized_executable = None

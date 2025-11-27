@@ -5,6 +5,8 @@ ScienceDirect 爬虫：拉取 RSS/JSON feed，调用 Elsevier API 进行元数�
 from __future__ import annotations
 
 import logging
+import os
+import time
 from datetime import datetime, timezone
 
 from econatlas._loader import load_local_module
@@ -31,6 +33,7 @@ class ScienceDirect爬虫:
     def __init__(self, feed_client: FeedClient, api_key: str | None, inst_token: str | None) -> None:
         self._feed_client = feed_client
         self._enricher: ScienceDirectEnricher | None = None
+        self._throttle_seconds = _throttle_seconds_from_env()
         if api_key:
             self._enricher = ScienceDirectEnricher(
                 api_client=ScienceDirectApiClient(ElsevierApiConfig(api_key=api_key, inst_token=inst_token))
@@ -40,6 +43,8 @@ class ScienceDirect爬虫:
         entries = self._feed_client.fetch(journal.rss_url)
         records: list[ArticleRecord] = []
         for entry in entries:
+            if self._throttle_seconds > 0:
+                time.sleep(self._throttle_seconds)
             record = _构建基础记录(entry)
             if self._enricher:
                 record, _, _ = self._enricher.enrich(record, entry)
@@ -69,3 +74,15 @@ def _构建基础记录(entry: NormalizedFeedEntry) -> ArticleRecord:
         ),
         fetched_at=datetime.now(timezone.utc),
     )
+
+
+def _throttle_seconds_from_env() -> float:
+    raw = os.getenv("SCIENCEDIRECT_THROTTLE_SECONDS")
+    if not raw:
+        return 0.0
+    try:
+        value = float(raw)
+        return value if value > 0 else 0.0
+    except ValueError:
+        LOGGER.warning("Invalid SCIENCEDIRECT_THROTTLE_SECONDS value: %s", raw)
+        return 0.0
