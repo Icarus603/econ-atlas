@@ -5,6 +5,7 @@ DeepSeek 翻译适配器：调用官方 API 翻译摘要。
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -23,10 +24,20 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 class DeepSeekTranslator(Translator):
     """基于 DeepSeek 的翻译实现。"""
 
-    def __init__(self, api_key: str, *, model: str = "deepseek-chat", timeout: float = 30.0):
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        model: str = "deepseek-chat",
+        timeout: float = 30.0,
+        max_retries: int = 5,
+        backoff_seconds: float = 1.0,
+    ):
         self._api_key = api_key
         self._model = model
         self._timeout = timeout
+        self._max_retries = max(1, max_retries)
+        self._backoff_seconds = backoff_seconds
 
     def translate(self, text: str, *, source_language: str | None = None, target_language: str = "zh") -> TranslationResult:
         if not text.strip():
@@ -60,18 +71,31 @@ class DeepSeekTranslator(Translator):
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-        try:
-            response = httpx.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=self._timeout)
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPError as exc:
-            LOGGER.error("DeepSeek 请求失败: %s", exc)
+        data: dict[str, object] | None = None
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                response = httpx.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=self._timeout)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except httpx.HTTPError as exc:
+                LOGGER.error("DeepSeek 请求失败: %s (attempt %s/%s)", exc, attempt, self._max_retries)
+                if attempt == self._max_retries:
+                    return TranslationResult(
+                        status="failed",
+                        translated_text=None,
+                        translator="deepseek",
+                        translated_at=datetime.now(timezone.utc),
+                        error=str(exc),
+                    )
+                time.sleep(self._backoff_seconds * attempt)
+        if data is None:
             return TranslationResult(
                 status="failed",
                 translated_text=None,
                 translator="deepseek",
                 translated_at=datetime.now(timezone.utc),
-                error=str(exc),
+                error="empty response",
             )
 
         message = (
