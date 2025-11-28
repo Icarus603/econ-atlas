@@ -8,6 +8,8 @@ import csv
 import json
 import logging
 import shutil
+import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import StringIO
@@ -555,6 +557,13 @@ def _translate_records(
 ) -> tuple[list[ArticleRecord], int, int]:
     if skip_translation:
         return records, 0, 0
+    throttle_raw = os.getenv("TRANSLATION_THROTTLE_SECONDS")
+    try:
+        throttle_seconds = float(throttle_raw) if throttle_raw else 0.5
+        if throttle_seconds < 0:
+            throttle_seconds = 0.0
+    except ValueError:
+        throttle_seconds = 0.5
     attempts = 0
     failures = 0
     translated: list[ArticleRecord] = []
@@ -564,6 +573,8 @@ def _translate_records(
         if not summary or (language and language.startswith("zh")):
             translated.append(record)
             continue
+        if throttle_seconds:
+            time.sleep(throttle_seconds)
         attempts += 1
         result: TranslationResult = translator.translate(summary, source_language=language or "unknown")
         if result.status == "failed":
