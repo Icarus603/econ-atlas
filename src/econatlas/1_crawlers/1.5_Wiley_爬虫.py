@@ -9,6 +9,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterable
 
 from bs4 import BeautifulSoup
@@ -166,6 +167,15 @@ class _PersistentBrowserSession:
     ) -> None:
         if self._context:
             return
+        if user_data_dir:
+            for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                lock_path = Path(user_data_dir) / lock_name
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    LOGGER.debug("无法移除旧锁 %s", lock_path)
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:  # pragma: no cover
