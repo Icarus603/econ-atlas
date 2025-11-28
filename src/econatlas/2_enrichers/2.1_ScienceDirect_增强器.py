@@ -36,7 +36,7 @@ class ElsevierApiConfig:
     inst_token: str | None = None
     base_url: str = DEFAULT_BASE_URL
     timeout: float = 15.0
-    max_retries: int = 3
+    max_retries: int = 5
     backoff_seconds: float = 1.0
 
 
