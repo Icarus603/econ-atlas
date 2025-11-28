@@ -79,10 +79,10 @@ def _构建基础记录(entry: NormalizedFeedEntry) -> ArticleRecord:
 def _throttle_seconds_from_env() -> float:
     raw = os.getenv("SCIENCEDIRECT_THROTTLE_SECONDS")
     if not raw:
-        return 0.0
+        return 3.0
     try:
         value = float(raw)
         return value if value > 0 else 0.0
     except ValueError:
         LOGGER.warning("Invalid SCIENCEDIRECT_THROTTLE_SECONDS value: %s", raw)
-        return 0.0
+        return 3.0

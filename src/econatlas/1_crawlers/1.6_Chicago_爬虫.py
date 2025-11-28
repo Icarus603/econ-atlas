@@ -318,10 +318,10 @@ def _throttle_seconds_from_env(source_type: str) -> float:
     env_key = f"{source_type.upper()}_THROTTLE_SECONDS"
     raw = os.getenv(env_key)
     if not raw:
-        return 0.0
+        return 3.0
     try:
         value = float(raw)
         return value if value > 0 else 0.0
     except ValueError:
         LOGGER.warning("Invalid %s value: %s", env_key, raw)
-        return 0.0
+        return 3.0
