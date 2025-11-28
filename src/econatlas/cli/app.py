@@ -457,14 +457,28 @@ def _run_once(
                 informs_crawler=informs_crawler,
                 feed_client=feed_client,
             )
+            base_store = store.persist(journal, records)
+            if skip_translation:
+                results.append(
+                    JournalRunResult(
+                        journal=journal,
+                        fetched=len(records),
+                        added=base_store.added,
+                        updated=base_store.updated,
+                        translation_attempts=0,
+                        translation_failures=0,
+                    )
+                )
+                continue
+
             translated_records, attempts, failures = _translate_records(records, translator, skip_translation)
-            stored = store.persist(journal, translated_records)
+            trans_store = store.persist(journal, translated_records)
             results.append(
                 JournalRunResult(
                     journal=journal,
                     fetched=len(records),
-                    added=stored.added,
-                    updated=stored.updated,
+                    added=base_store.added,
+                    updated=base_store.updated + trans_store.updated,
                     translation_attempts=attempts,
                     translation_failures=failures,
                 )
