@@ -388,7 +388,7 @@ def _render_inventory(inventories: list[Any], fmt: str, pretty: bool) -> str:
 
 def _normalize_crawl_sources(include_source: Optional[list[str]]) -> set[str] | None:
     if not include_source:
-        return {value for value in ALLOWED_SOURCE_TYPES if value not in {"wiley", "chicago", "informs"}}
+        return set(ALLOWED_SOURCE_TYPES)
     normalized = {value.strip().lower() for value in include_source if value and value.strip()}
     invalid = normalized - ALLOWED_SOURCE_TYPES
     if invalid:
@@ -579,32 +579,59 @@ def _translate_records(
     except ValueError:
         throttle_seconds = 0.5
     attempts = 0
-    failures = 0
     translated: list[ArticleRecord] = []
-    for record in records:
+    results: list[TranslationResult | None] = []
+    failure_indices: list[int] = []
+    for idx, record in enumerate(records):
         summary = record.abstract_original or ""
         language = record.abstract_language
         if not summary or (language and language.startswith("zh")):
             translated.append(record)
+            results.append(None)
             continue
         if throttle_seconds:
             time.sleep(throttle_seconds)
         attempts += 1
         result: TranslationResult = translator.translate(summary, source_language=language or "unknown")
+        results.append(result)
         if result.status == "failed":
-            failures += 1
-        translated_record = record.model_copy(
-            update={
-                "abstract_zh": result.translated_text or record.abstract_zh,
-                "translation": TranslationRecord(
-                    status=result.status,
-                    translator=result.translator,
-                    translated_at=result.translated_at,
-                    error=result.error,
-                ),
-            }
+            failure_indices.append(idx)
+        translated.append(
+            record.model_copy(
+                update={
+                    "abstract_zh": result.translated_text or record.abstract_zh,
+                    "translation": TranslationRecord(
+                        status=result.status,
+                        translator=result.translator,
+                        translated_at=result.translated_at,
+                        error=result.error,
+                    ),
+                }
+            )
         )
-        translated.append(translated_record)
+    if failure_indices:
+        LOGGER.info("翻译失败 %d 条，开始补偿重试", len(failure_indices))
+        for idx in failure_indices:
+            record = records[idx]
+            summary = record.abstract_original or ""
+            language = record.abstract_language
+            if throttle_seconds:
+                time.sleep(throttle_seconds)
+            attempts += 1
+            retry_result: TranslationResult = translator.translate(summary, source_language=language or "unknown")
+            results[idx] = retry_result
+            translated[idx] = record.model_copy(
+                update={
+                    "abstract_zh": retry_result.translated_text or record.abstract_zh,
+                    "translation": TranslationRecord(
+                        status=retry_result.status,
+                        translator=retry_result.translator,
+                        translated_at=retry_result.translated_at,
+                        error=retry_result.error,
+                    ),
+                }
+            )
+    failures = sum(1 for result in results if result and result.status == "failed")
     return translated, attempts, failures
 
 

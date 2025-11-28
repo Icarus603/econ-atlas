@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -151,8 +152,9 @@ class _PersistentBrowserSession:
         self._playwright = None
         self._browser = None
         self._context = None
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
-    def ensure_session(
+    def _ensure_session(
         self,
         *,
         headers: dict[str, str],
@@ -237,43 +239,53 @@ class _PersistentBrowserSession:
         headless = browser_headless_for_source(self._source_type)
         browser_channel, executable_path = browser_launch_overrides(self._source_type)
 
-        self.ensure_session(
-            headers=headers,
-            cookies=cookies,
-            credentials=credentials.as_dict() if credentials else None,  # type: ignore[arg-type]
-            user_agent=user_agent,
-            init_scripts=init_scripts or None,
-            user_data_dir=user_data_dir,
-            headless=headless,
-            browser_channel=browser_channel,
-            executable_path=executable_path,
-        )
-        assert self._context is not None
-        page = self._context.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=45_000)
-        if wait_selector:
-            try:
-                page.wait_for_selector(wait_selector, timeout=45_000)
-            except Exception:
-                LOGGER.debug("等待选择器 %s 超时: %s", wait_selector, url)
-        html_text = page.content()
-        page.close()
-        return html_text
+        def _run() -> str:
+            self._ensure_session(
+                headers=headers,
+                cookies=cookies,
+                credentials=credentials.as_dict() if credentials else None,  # type: ignore[arg-type]
+                user_agent=user_agent,
+                init_scripts=init_scripts or None,
+                user_data_dir=user_data_dir,
+                headless=headless,
+                browser_channel=browser_channel,
+                executable_path=executable_path,
+            )
+            assert self._context is not None
+            page = self._context.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+            if wait_selector:
+                try:
+                    page.wait_for_selector(wait_selector, timeout=45_000)
+                except Exception:
+                    LOGGER.debug("等待选择器 %s 超时: %s", wait_selector, url)
+            html_text = page.content()
+            page.close()
+            return html_text
+
+        return self._executor.submit(_run).result()
 
     def close(self) -> None:
+        def _close() -> None:
+            try:
+                if self._context:
+                    self._context.close()
+                if self._browser:
+                    self._browser.close()
+                if self._playwright:
+                    self._playwright.stop()
+            except Exception:
+                LOGGER.debug("关闭 Informs 会话失败", exc_info=True)
+            finally:
+                self._context = None
+                self._browser = None
+                self._playwright = None
+
         try:
-            if self._context:
-                self._context.close()
-            if self._browser:
-                self._browser.close()
-            if self._playwright:
-                self._playwright.stop()
+            self._executor.submit(_close).result(timeout=10)
         except Exception:
             LOGGER.debug("关闭 Informs 会话失败", exc_info=True)
-        finally:
-            self._context = None
-            self._browser = None
-            self._playwright = None
+        self._executor.shutdown(wait=True, cancel_futures=True)
 
 
 def _throttle_seconds_from_env(source_type: str) -> float:

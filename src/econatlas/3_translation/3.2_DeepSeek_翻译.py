@@ -35,9 +35,9 @@ class DeepSeekTranslator(Translator):
     ):
         self._api_key = api_key
         self._model = model
-        self._timeout = timeout
         self._max_retries = max(1, max_retries)
         self._backoff_seconds = backoff_seconds
+        self._client = httpx.Client(timeout=timeout)
 
     def translate(self, text: str, *, source_language: str | None = None, target_language: str = "zh") -> TranslationResult:
         if not text.strip():
@@ -72,15 +72,17 @@ class DeepSeekTranslator(Translator):
             "Content-Type": "application/json",
         }
         data: dict[str, object] | None = None
+        last_error: str | None = None
         for attempt in range(1, self._max_retries + 1):
             try:
-                response = httpx.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=self._timeout)
+                response = self._client.post(DEEPSEEK_API_URL, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
                 break
             except httpx.HTTPError as exc:
-                LOGGER.error("DeepSeek 请求失败: %s (attempt %s/%s)", exc, attempt, self._max_retries)
+                last_error = str(exc)
                 if attempt == self._max_retries:
+                    LOGGER.warning("DeepSeek 请求失败（已达上限）: %s", exc)
                     return TranslationResult(
                         status="failed",
                         translated_text=None,
@@ -88,14 +90,15 @@ class DeepSeekTranslator(Translator):
                         translated_at=datetime.now(timezone.utc),
                         error=str(exc),
                     )
-                time.sleep(self._backoff_seconds * attempt)
+                delay = min(self._backoff_seconds * (2 ** (attempt - 1)), 10.0)
+                time.sleep(delay)
         if data is None:
             return TranslationResult(
                 status="failed",
                 translated_text=None,
                 translator="deepseek",
                 translated_at=datetime.now(timezone.utc),
-                error="empty response",
+                error=last_error or "empty response",
             )
 
         message = (

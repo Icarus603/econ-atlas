@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any
 
 from pathlib import Path
@@ -40,8 +41,9 @@ class PersistentOxfordSession:
         self._browser = None
         self._context = None
         self._throttle_seconds = _throttle_seconds_from_env()
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
-    def ensure_session(
+    def _ensure_session(
         self,
         *,
         headers: dict[str, str],
@@ -117,35 +119,47 @@ class PersistentOxfordSession:
         self._context = context
 
     def fetch(self, url: str, wait_selector: str | None) -> str:
-        if not self._context:
-            raise RuntimeError("会话未初始化")
-        page = self._context.new_page()
-        if self._throttle_seconds > 0:
-            time.sleep(self._throttle_seconds)
-        page.goto(url, wait_until="domcontentloaded", timeout=45_000)
-        if wait_selector:
-            try:
-                page.wait_for_selector(wait_selector, timeout=45_000)
-            except Exception:  # noqa: BLE001
-                LOGGER.debug("等待选择器 %s 超时: %s", wait_selector, url)
-        html_text = page.content()
-        page.close()
-        return html_text
+        def _run() -> str:
+            if not self._context:
+                raise RuntimeError("会话未初始化")
+            page = self._context.new_page()
+            if self._throttle_seconds > 0:
+                time.sleep(self._throttle_seconds)
+            page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+            if wait_selector:
+                try:
+                    page.wait_for_selector(wait_selector, timeout=45_000)
+                except Exception:  # noqa: BLE001
+                    LOGGER.debug("等待选择器 %s 超时: %s", wait_selector, url)
+            html_text = page.content()
+            page.close()
+            return html_text
+
+        return self._executor.submit(_run).result()
 
     def close(self) -> None:
+        def _close() -> None:
+            try:
+                if self._context:
+                    self._context.close()
+                if self._browser:
+                    self._browser.close()
+                if self._playwright:
+                    self._playwright.stop()
+            except Exception:
+                LOGGER.debug("关闭 Oxford 会话失败", exc_info=True)
+            finally:
+                self._context = None
+                self._browser = None
+                self._playwright = None
+
         try:
-            if self._context:
-                self._context.close()
-            if self._browser:
-                self._browser.close()
-            if self._playwright:
-                self._playwright.stop()
+            self._executor.submit(_close).result(timeout=10)
+        except FuturesTimeout:
+            LOGGER.debug("关闭 Oxford 会话超时", exc_info=True)
         except Exception:
             LOGGER.debug("关闭 Oxford 会话失败", exc_info=True)
-        finally:
-            self._context = None
-            self._browser = None
-            self._playwright = None
+        self._executor.shutdown(wait=True, cancel_futures=True)
 
 
 class OxfordArticleFetcher:
@@ -166,7 +180,8 @@ class OxfordArticleFetcher:
         user_data_dir = os.getenv("OXFORD_USER_DATA_DIR")
         headless = browser_headless_for_source(OXFORD_SOURCE_TYPE)
         browser_channel, executable_path = browser_launch_overrides(OXFORD_SOURCE_TYPE)
-        self._session.ensure_session(
+        self._session._executor.submit(  # type: ignore[attr-defined]
+            self._session._ensure_session,  # type: ignore[attr-defined]
             headers=headers,
             cookies=cookies,
             credentials=credentials,
@@ -177,7 +192,7 @@ class OxfordArticleFetcher:
             headless=headless,
             browser_channel=browser_channel,
             executable_path=executable_path,
-        )
+        ).result()
         html_text = self._session.fetch(url, wait_selector=wait_selector)
         return html_text
 

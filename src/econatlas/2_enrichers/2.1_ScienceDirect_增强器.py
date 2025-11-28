@@ -55,7 +55,15 @@ class ScienceDirectApiClient:
         headers = self._build_headers()
         params = {"httpAccept": "application/json"}
         for attempt in range(1, self._config.max_retries + 1):
-            response = self._client.get(url, headers=headers, params=params)
+            try:
+                response = self._client.get(url, headers=headers, params=params)
+            except httpx.HTTPError as exc:
+                delay = min(self._config.backoff_seconds * (2 ** (attempt - 1)), 30)
+                LOGGER.warning("Elsevier API 连接失败 %s (attempt %s/%s); %.1fs 后重试", exc, attempt, self._config.max_retries, delay)
+                if attempt == self._config.max_retries:
+                    raise ScienceDirectApiError(f"Elsevier API 连接失败: {exc}", recoverable=True) from exc
+                time.sleep(delay)
+                continue
             if response.status_code == 200:
                 return cast(dict[str, Any], response.json())
             if response.status_code in {401, 403}:
@@ -97,28 +105,30 @@ class ScienceDirectEnricher:
         self,
         record: ArticleRecord,
         entry: NormalizedFeedEntry,
-    ) -> tuple[ArticleRecord, int, int]:
+    ) -> tuple[ArticleRecord, bool]:
         if self._api_client is None:
             if not self._logged_missing_client:
                 LOGGER.warning("缺少 ScienceDirect API client，跳过增强：%s", entry.link or entry.entry_id)
                 self._logged_missing_client = True
-            return record, 0, 0
+            return record, True
 
         pii = _pii_from_entry(entry)
         if not pii:
             LOGGER.warning("ScienceDirect entry 缺少 PII，跳过：%s", entry.link or entry.entry_id)
-            return record, 0, 0
+            return record, True
 
         try:
             payload = self._api_client.fetch_by_pii(pii)
             api_result = self._apply_api_payload(record, payload)
             if api_result is not None:
-                return api_result
+                enriched_record, added, updated = api_result
+                _ = (added, updated)  # 保留原返回结构
+                return enriched_record, True
             LOGGER.warning("ScienceDirect API 返回信息不足：%s", entry.link or entry.entry_id)
         except ScienceDirectApiError as exc:
             LOGGER.warning("ScienceDirect API 调用失败 %s: %s", entry.link or entry.entry_id, exc)
 
-        return record, 0, 0
+        return record, False
 
     def _apply_api_payload(
         self,

@@ -8,6 +8,8 @@ import hashlib
 import logging
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
+import time
 from datetime import datetime
 from typing import Any, Iterable, Sequence, Protocol
 from urllib.parse import urlparse
@@ -74,6 +76,35 @@ class BrowserFetcher(Protocol):
         ...
 
 
+class _ThreadedBrowserFetcher(BrowserFetcher):
+    """将同步 PlaywrightFetcher 放入线程，避免阻塞/事件循环冲突。"""
+
+    def __init__(self, delegate: BrowserFetcher | None = None) -> None:
+        self._delegate = delegate or PlaywrightFetcher()
+        self._executor = ThreadPoolExecutor(max_workers=1)
+
+    def fetch(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        cookies: dict[str, str] | None,
+        credentials: BrowserCredentials | None,
+        user_agent: str,
+    ) -> bytes:
+        return self._executor.submit(
+            self._delegate.fetch,
+            url=url,
+            headers=headers,
+            cookies=cookies,
+            credentials=credentials,
+            user_agent=user_agent,
+        ).result()
+
+    def close(self) -> None:
+        self._executor.shutdown(wait=True, cancel_futures=True)
+
+
 class FeedClient:
     """拉取 RSS/Atom 或 JSON feed，并输出标准化条目。"""
 
@@ -99,13 +130,24 @@ class FeedClient:
                 return self._parse_json_payload(rss_url, text)
             return self._parse_rss_feed(rss_url, text)
 
-        response = httpx.get(
-            rss_url,
-            timeout=self._timeout,
-            headers=headers,
-            cookies=cookies or None,
-        )
-        response.raise_for_status()
+        response: httpx.Response | None = None
+        for attempt in range(1, 6):
+            try:
+                response = httpx.get(
+                    rss_url,
+                    timeout=self._timeout,
+                    headers=headers,
+                    cookies=cookies or None,
+                )
+                response.raise_for_status()
+                break
+            except httpx.HTTPError as exc:
+                if attempt == 5:
+                    raise
+                delay = min(1.5 * attempt, 8.0)
+                LOGGER.warning("Feed 请求失败 %s (attempt %s/5); %.1fs 后重试", exc, attempt, delay)
+                time.sleep(delay)
+        assert response is not None
         if _looks_like_json(response):
             return self._parse_json_payload(rss_url, response.text)
         return self._parse_rss_feed(rss_url, response.text)
@@ -168,7 +210,7 @@ class FeedClient:
 
     def _ensure_browser_fetcher(self) -> BrowserFetcher:
         if self._browser_fetcher is None:
-            fetcher: BrowserFetcher = PlaywrightFetcher()
+            fetcher: BrowserFetcher = _ThreadedBrowserFetcher()
             self._browser_fetcher = fetcher
         assert self._browser_fetcher is not None
         return self._browser_fetcher
