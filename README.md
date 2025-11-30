@@ -18,17 +18,7 @@
 - 全局浏览器（可选）：`BROWSER_EXECUTABLE`、`BROWSER_USER_AGENT`、`BROWSER_HEADERS`、`BROWSER_HEADLESS=true/false`、`BROWSER_USER_DATA_DIR`。  
 - 节流（秒，可选，默认 3s）：`OXFORD_THROTTLE_SECONDS`、`WILEY_THROTTLE_SECONDS`、`CHICAGO_THROTTLE_SECONDS`、`INFORMS_THROTTLE_SECONDS`、`SCIENCEDIRECT_THROTTLE_SECONDS`。  
 - 每站 Cookies（可选）：`OXFORD_COOKIES`、`WILEY_COOKIES`、`CHICAGO_COOKIES`、`INFORMS_COOKIES`。
-- CNKI 首次建档：先用持久 profile 打开任意 CNKI 文章并手动通过安全验证：  
-  ```bash
-  /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-    --user-data-dir="$(pwd)/.cache/econ-atlas/profile" \
-    --profile-directory=Default
-  ```  
-  完成验证后再运行爬虫，避免被安全验证拦截。
-  示例文章：  
-  https://kns.cnki.net/kcms/detail/detail.aspx?dbcode=CJFD&dbname=CJFDLAST2024&filename=JJYJ202401001&uniplatform=NZKPT
-  
-  说明：Cambridge / ScienceDirect 走 API 或非 Playwright，不会遇到此验证码；目前使用 Playwright 的来源（Oxford/Wiley/Chicago/INFORMS/NBER/CNKI）仅 CNKI 可能触发此验证，其他来源暂未观察到。
+- CNKI 摘要：仅使用 RSS 中的摘要，不再打开页面（避免验证码），若需完整摘要需另行手动获取。
 
 3) 常用命令  
 - 全量抓取：`uv run econ-atlas crawl --once --skip-translation`  

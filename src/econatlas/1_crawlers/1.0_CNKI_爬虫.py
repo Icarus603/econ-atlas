@@ -10,9 +10,6 @@ from datetime import datetime, timezone
 from econatlas._loader import load_local_module
 from econatlas.models import ArticleRecord, JournalSource, NormalizedFeedEntry, TranslationRecord
 
-_enricher_mod = load_local_module(__file__, "../2_enrichers/2.3_CNKI_增强器.py", "econatlas._enricher_cnki")
-CNKIEnricher = _enricher_mod.CNKIEnricher  # type: ignore[attr-defined]
-
 _feed_mod = load_local_module(__file__, "../0_feeds/0.1_RSS_抓取.py", "econatlas._feed_rss")
 FeedClient = _feed_mod.FeedClient  # type: ignore[attr-defined]
 
@@ -24,18 +21,16 @@ LOGGER = logging.getLogger(__name__)
 
 
 class CNKI爬虫:
-    """CNKI 来源：直接拉取 feed 并构建记录。"""
+    """CNKI 来源：仅使用 RSS 内容，不再尝试页面抓取。"""
 
     def __init__(self, feed_client: FeedClient) -> None:
         self._feed_client = feed_client
-        self._enricher = CNKIEnricher()
 
     def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
         entries = self._feed_client.fetch(journal.rss_url)
         records: list[ArticleRecord] = []
         for entry in entries:
             record = _构建基础记录(entry)
-            record = self._enricher.enrich(record, entry)
             records.append(record)
         return records
 
