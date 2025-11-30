@@ -11,7 +11,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any
 
-from pathlib import Path
 from bs4 import BeautifulSoup
 
 from econatlas.models import ArticleRecord, NormalizedFeedEntry

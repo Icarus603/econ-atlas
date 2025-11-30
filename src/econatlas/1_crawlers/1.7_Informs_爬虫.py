@@ -9,7 +9,6 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterable
 
 from bs4 import BeautifulSoup

@@ -125,6 +125,15 @@ def crawl(
         "--skip-translation",
         help="跳过翻译以提升速度。",
     ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="使用进度文件断点续跑（按 slug 跳过已完成并在成功后写回进度）。",
+    ),
+    resume_path: Path = typer.Option(
+        Path(".cache/crawl_progress.json"),
+        help="进度文件路径（配合 --resume 生效）。",
+    ),
 ) -> None:
     """全量抓取入口。"""
     if ctx.invoked_subcommand:
@@ -181,6 +190,8 @@ def crawl(
         scd_api_key=settings.elsevier_api_key,
         scd_inst_token=settings.elsevier_inst_token,
         skip_translation=settings.skip_translation,
+        resume=resume,
+        resume_path=resume_path if resume else None,
     )
     _print_report(report)
     raise typer.Exit(code=0 if not report.had_errors else 1)
@@ -205,6 +216,15 @@ def crawl_publisher(
         False,
         "--skip-translation",
         help="跳过翻译以提升速度。",
+    ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="使用进度文件断点续跑（按 slug 跳过已完成并在成功后写回进度）。",
+    ),
+    resume_path: Path = typer.Option(
+        Path(".cache/crawl_progress.json"),
+        help="进度文件路径（配合 --resume 生效）。",
     ),
 ) -> None:
     """按单一出版商运行抓取。"""
@@ -261,6 +281,8 @@ def crawl_publisher(
         scd_api_key=settings.elsevier_api_key,
         scd_inst_token=settings.elsevier_inst_token,
         skip_translation=settings.skip_translation,
+        resume=resume,
+        resume_path=resume_path if resume else None,
     )
     _print_report(report)
     raise typer.Exit(code=0 if not report.had_errors else 1)
@@ -420,6 +442,26 @@ def _configure_logging(verbose: bool) -> None:
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
 
 
+def _load_completed_slugs(path: Path) -> set[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return {str(item) for item in data}
+    except FileNotFoundError:
+        return set()
+    except Exception:
+        LOGGER.debug("读取进度文件失败 %s", path, exc_info=True)
+    return set()
+
+
+def _save_completed_slugs(path: Path, slugs: set[str]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(sorted(slugs), ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        LOGGER.debug("写入进度文件失败 %s", path, exc_info=True)
+
+
 def _run_once(
     *,
     journals: list[JournalSource],
@@ -429,10 +471,15 @@ def _run_once(
     scd_api_key: str | None,
     scd_inst_token: str | None,
     skip_translation: bool,
+    resume: bool = False,
+    resume_path: Path | None = None,
 ) -> RunReport:
     started = datetime.now(timezone.utc)
     results: list[JournalRunResult] = []
     errors: list[str] = []
+    completed_slugs: set[str] = set()
+    if resume and resume_path:
+        completed_slugs = _load_completed_slugs(resume_path)
 
     scd_crawler = ScienceDirect爬虫(feed_client, scd_api_key, scd_inst_token)
     oxford_crawler = Oxford爬虫(feed_client)
@@ -444,6 +491,9 @@ def _run_once(
     informs_crawler = Informs爬虫(feed_client)
 
     for journal in journals:
+        if resume and resume_path and journal.slug in completed_slugs:
+            LOGGER.info("跳过已完成 %s（resume）", journal.slug)
+            continue
         try:
             records = _crawl_with_dispatch(
                 journal,
@@ -483,6 +533,9 @@ def _run_once(
                     translation_failures=failures,
                 )
             )
+            if resume and resume_path:
+                completed_slugs.add(journal.slug)
+                _save_completed_slugs(resume_path, completed_slugs)
         except Exception as exc:  # noqa: BLE001
             msg = f"{journal.name}: {exc}"
             LOGGER.exception("处理失败 %s", journal.name)

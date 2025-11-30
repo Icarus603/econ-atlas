@@ -9,7 +9,6 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from bs4 import BeautifulSoup
