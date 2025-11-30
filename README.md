@@ -23,6 +23,7 @@
 3) 常用命令  
 - 全量抓取：`uv run econ-atlas crawl --once --skip-translation`  
 - 指定出版商：`uv run econ-atlas crawl publisher sciencedirect --once --skip-translation`  
+- 断点续跑：`uv run econ-atlas crawl --resume [--resume-path .cache/crawl_progress.json]`（publisher 子命令同样支持）。
 - 采集样本：`uv run econ-atlas samples collect --limit 3 --sdir-debug`  
 - 样本清单：`uv run econ-atlas samples inventory --format csv > samples.csv`
 
