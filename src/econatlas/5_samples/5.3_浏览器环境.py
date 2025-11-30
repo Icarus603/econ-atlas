@@ -186,6 +186,18 @@ def browser_user_data_dir_for_source(source_type: str) -> str | None:
     return None
 
 
+def cleanup_user_data_dir(user_data_dir: str) -> None:
+    """删除 Chrome 持久化目录下的 Singleton* 锁文件。"""
+    for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        lock_path = Path(user_data_dir) / lock_name
+        try:
+            lock_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            LOGGER.debug("无法删除锁文件 %s", lock_path)
+
+
 def browser_headless_for_source(source_type: str) -> bool:
     value = os.getenv("BROWSER_HEADLESS")
     if value is None:

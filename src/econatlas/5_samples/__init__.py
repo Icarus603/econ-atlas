@@ -34,6 +34,7 @@ cookies_for_source = _env.cookies_for_source
 rewrite_sciencedirect_url = _env.rewrite_sciencedirect_url
 require_sciencedirect_profile = _env.require_sciencedirect_profile
 local_storage_script = _env.local_storage_script
+cleanup_user_data_dir = _env.cleanup_user_data_dir
 
 SourceInventory = _inventory.SourceInventory
 JournalInventory = _inventory.JournalInventory
@@ -60,6 +61,7 @@ __all__ = [
     "rewrite_sciencedirect_url",
     "require_sciencedirect_profile",
     "local_storage_script",
+    "cleanup_user_data_dir",
     "SourceInventory",
     "JournalInventory",
     "build_inventory",

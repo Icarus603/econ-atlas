@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from econatlas._loader import load_local_module
 from econatlas.models import ArticleRecord, JournalSource, NormalizedFeedEntry, TranslationRecord
 
+_enricher_mod = load_local_module(__file__, "../2_enrichers/2.4_NBER_增强器.py", "econatlas._enricher_nber")
+NBEREnricher = _enricher_mod.NBEREnricher  # type: ignore[attr-defined]
+
 _feed_mod = load_local_module(__file__, "../0_feeds/0.1_RSS_抓取.py", "econatlas._feed_rss")
 FeedClient = _feed_mod.FeedClient  # type: ignore[attr-defined]
 
@@ -22,10 +25,16 @@ class NBER爬虫:
 
     def __init__(self, feed_client: FeedClient) -> None:
         self._feed_client = feed_client
+        self._enricher = NBEREnricher()
 
     def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
         entries = self._feed_client.fetch(journal.rss_url)
-        return [_构建基础记录(entry) for entry in entries]
+        records: list[ArticleRecord] = []
+        for entry in entries:
+            record = _构建基础记录(entry)
+            record = self._enricher.enrich(record, entry)
+            records.append(record)
+        return records
 
 
 def _构建基础记录(entry: NormalizedFeedEntry) -> ArticleRecord:

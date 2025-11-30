@@ -35,6 +35,7 @@ browser_user_data_dir_for_source = _samples_env.browser_user_data_dir_for_source
 browser_headless_for_source = _samples_env.browser_headless_for_source  # type: ignore[attr-defined]
 browser_launch_overrides = _samples_env.browser_launch_overrides  # type: ignore[attr-defined]
 cookies_for_source = _samples_env.cookies_for_source  # type: ignore[attr-defined]
+cleanup_user_data_dir = _samples_env.cleanup_user_data_dir  # type: ignore[attr-defined]
 local_storage_script = _samples_env.local_storage_script  # type: ignore[attr-defined]
 
 _browser_mod = load_local_module(__file__, "../5_samples/5.2_浏览器抓取.py", "econatlas._samples_fetcher")
@@ -169,6 +170,27 @@ def _提取作者(html: str) -> list[str]:
 
 def _提取摘要(html: str) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
+    # 优先抓取正文中的完整摘要，避免 meta 截断。
+    def _class_contains(value: str | list[str] | None, keyword: str) -> bool:
+        if not value:
+            return False
+        if isinstance(value, str):
+            tokens = value.lower().split()
+        else:
+            tokens = [item.lower() for item in value]
+        return any(keyword in token for token in tokens)
+
+    for node in soup.find_all(["section", "div"], attrs={"id": True}):
+        if "abstract" in str(node.get("id", "")).lower():
+            text = " ".join(p.get_text(" ", strip=True) for p in node.find_all(["p", "div"], recursive=True))
+            if text:
+                return text
+    for node in soup.find_all(["section", "div"], attrs={"class": True}):
+        if _class_contains(node.get("class"), "abstract"):
+            text = " ".join(p.get_text(" ", strip=True) for p in node.find_all(["p", "div"], recursive=True))
+            if text:
+                return text
+
     for meta_name in ("citation_abstract", "dc.Description", "description"):
         meta = soup.find("meta", attrs={"name": meta_name})
         if meta:
@@ -209,14 +231,7 @@ class _PersistentBrowserSession:
         if self._context:
             return
         if user_data_dir:
-            for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
-                lock_path = Path(user_data_dir) / lock_name
-                try:
-                    lock_path.unlink()
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    LOGGER.debug("无法移除旧锁 %s", lock_path)
+            cleanup_user_data_dir(user_data_dir)
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:  # pragma: no cover

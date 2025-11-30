@@ -20,6 +20,8 @@ from econatlas.samples import (
     PlaywrightFetcher,
     browser_credentials_for_source,
     browser_headless_for_source,
+    cleanup_user_data_dir,
+    browser_user_data_dir_for_source,
     browser_launch_overrides,
     browser_local_storage_for_source,
     browser_user_agent_for_source,
@@ -60,14 +62,7 @@ class PersistentOxfordSession:
         if self._context:
             return
         if user_data_dir:
-            for lock_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
-                lock_path = Path(user_data_dir) / lock_name
-                try:
-                    lock_path.unlink()
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    LOGGER.debug("无法移除旧锁 %s", lock_path)
+            cleanup_user_data_dir(user_data_dir)
 
         try:
             from playwright.sync_api import sync_playwright
@@ -115,6 +110,13 @@ class PersistentOxfordSession:
         if init_scripts:
             for script in init_scripts:
                 context.add_init_script(script)
+
+        # 关闭默认空白页，避免 GUI 下残留 about:blank
+        for page in list(context.pages):
+            try:
+                page.close()
+            except Exception:
+                LOGGER.debug("关闭默认页面失败", exc_info=True)
 
         self._context = context
 
@@ -177,7 +179,9 @@ class OxfordArticleFetcher:
         local_storage_entries = browser_local_storage_for_source(OXFORD_SOURCE_TYPE)
         if local_storage_entries:
             init_scripts.append(local_storage_script(local_storage_entries))
-        user_data_dir = os.getenv("OXFORD_USER_DATA_DIR")
+        user_data_dir = browser_user_data_dir_for_source(OXFORD_SOURCE_TYPE)
+        if user_data_dir:
+            cleanup_user_data_dir(user_data_dir)
         headless = browser_headless_for_source(OXFORD_SOURCE_TYPE)
         browser_channel, executable_path = browser_launch_overrides(OXFORD_SOURCE_TYPE)
         self._session._executor.submit(  # type: ignore[attr-defined]

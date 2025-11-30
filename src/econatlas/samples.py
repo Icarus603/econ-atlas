@@ -30,6 +30,7 @@ cookies_for_source = _pkg.cookies_for_source
 rewrite_sciencedirect_url = _pkg.rewrite_sciencedirect_url
 require_sciencedirect_profile = _pkg.require_sciencedirect_profile
 local_storage_script = _pkg.local_storage_script
+cleanup_user_data_dir = _pkg.cleanup_user_data_dir
 SourceInventory = _pkg.SourceInventory
 JournalInventory = _pkg.JournalInventory
 build_inventory = _pkg.build_inventory
@@ -55,6 +56,7 @@ __all__ = [
     "rewrite_sciencedirect_url",
     "require_sciencedirect_profile",
     "local_storage_script",
+    "cleanup_user_data_dir",
     "SourceInventory",
     "JournalInventory",
     "build_inventory",
