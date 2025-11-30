@@ -24,9 +24,10 @@
     --user-data-dir="$(pwd)/.cache/econ-atlas/profile" \
     --profile-directory=Default
   ```  
-  完成验证码后再运行爬虫，避免被安全验证拦截。
-  示例文章验证页：  
-  https://kns.cnki.net/verify/home?captchaType=clickWord&ident=bc397c&captchaId=25a62995-1e07-4394-96a5-757247d5684d&returnUrl=iECBDnhr716Qd6pbb7El10nguP5Sbm9UQxpzsYxSAM-JuReIJajXtNdr2yG6yJzj8xtuLP3wd443vY_OaZyR0jT6sBJLsgoyNCTf0GcJaVUVOGk5y_xIRc9m7san12A_std8_2Z4w_8c8iJ045z2ryDxv9zkepG549CWjuNuQ9MVIjQ1k3sd2KzBMuKLHOnzYjmPX0FYYcmOn-fsXcjx8Un6mCZsWPlQb7XIPURuyV5PLb2htFL27zbYSeDNlemfQNGs7_Uihf7Ebo01Ui4RrTo3T544lG3kH2M_GOkYJKkT_Py_HVAVdWFHRKT_zn9pLhFGrLaSxQMXBKLvB1PQkZEYiP3KcOh_
+  完成验证后再运行爬虫，避免被安全验证拦截。
+  示例文章：  
+  https://kns.cnki.net/kcms/detail/detail.aspx?dbcode=CJFD&dbname=CJFDLAST2024&filename=JJYJ202401001&uniplatform=NZKPT
+  
   说明：Cambridge / ScienceDirect 走 API 或非 Playwright，不会遇到此验证码；目前使用 Playwright 的来源（Oxford/Wiley/Chicago/INFORMS/NBER/CNKI）仅 CNKI 可能触发此验证，其他来源暂未观察到。
 
 3) 常用命令  
