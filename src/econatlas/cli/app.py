@@ -101,12 +101,6 @@ def crawl(
     ctx: typer.Context,
     list_path: Path = typer.Option(Path("list.csv"), exists=True, help="期刊列表 CSV 路径。"),
     output_dir: Path = typer.Option(Path("data"), help="期刊 JSON 输出目录。"),
-    once: bool = typer.Option(False, "--once", help="仅运行一次后退出。"),
-    interval: str = typer.Option("7d", help="运行间隔，例如 12h、2d，--once 时忽略。"),
-    interval_seconds: Optional[int] = typer.Option(
-        None,
-        help="直接传入秒数，覆盖 --interval。",
-    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="开启详细日志。"),
     include_source: Optional[list[str]] = typer.Option(
         None,
@@ -142,9 +136,6 @@ def crawl(
         settings = build_settings(
             list_path=list_path,
             output_dir=output_dir,
-            interval_text=interval,
-            interval_seconds=interval_seconds,
-            run_once=once,
             include_slugs=slug_filter,
             include_sources=source_filter,
             skip_translation=skip_translation,
@@ -196,9 +187,6 @@ def crawl_publisher(
     source: str = typer.Argument(..., help="出版商来源，如 sciencedirect/oxford/cambridge 等。"),
     list_path: Path = typer.Option(Path("list.csv"), exists=True, help="期刊列表 CSV 路径。"),
     output_dir: Path = typer.Option(Path("data"), help="期刊 JSON 输出目录。"),
-    once: bool = typer.Option(True, "--once", help="默认只跑一轮；如需循环可指定 --once false。"),
-    interval: str = typer.Option("7d", help="循环间隔，仅当 --once false 时有效。"),
-    interval_seconds: Optional[int] = typer.Option(None, help="覆盖 --interval 的秒数。"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="开启详细日志。"),
     include_slug: Optional[list[str]] = typer.Option(
         None,
@@ -228,9 +216,6 @@ def crawl_publisher(
         settings = build_settings(
             list_path=list_path,
             output_dir=output_dir,
-            interval_text=interval,
-            interval_seconds=interval_seconds,
-            run_once=once,
             include_slugs=slug_filter,
             include_sources={normalized_source},
             skip_translation=skip_translation,

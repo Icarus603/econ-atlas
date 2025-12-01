@@ -40,7 +40,7 @@ def test_crawl_publisher_does_not_trigger_parent_callback(monkeypatch: MonkeyPat
 
     result = runner.invoke(
         app,
-        ["crawl", "publisher", "sciencedirect", "--once", "--skip-translation"],
+        ["crawl", "publisher", "sciencedirect", "--skip-translation"],
         env={"DEEPSEEK_API_KEY": "dummy"},
     )
 

@@ -5,6 +5,6 @@
 
 from __future__ import annotations
 
-from .settings import Settings, SettingsError, build_settings, parse_interval
+from .settings import Settings, SettingsError, build_settings
 
-__all__ = ["Settings", "SettingsError", "build_settings", "parse_interval"]
+__all__ = ["Settings", "SettingsError", "build_settings"]
