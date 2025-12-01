@@ -125,14 +125,9 @@ def crawl(
         "--skip-translation",
         help="跳过翻译以提升速度。",
     ),
-    resume: bool = typer.Option(
-        False,
-        "--resume",
-        help="使用进度文件断点续跑（按 slug 跳过已完成并在成功后写回进度）。",
-    ),
-    resume_path: Path = typer.Option(
+    progress_path: Path = typer.Option(
         Path(".cache/crawl_progress.json"),
-        help="进度文件路径（配合 --resume 生效）。",
+        help="进度文件路径，默认开启断点续跑。",
     ),
 ) -> None:
     """全量抓取入口。"""
@@ -190,8 +185,7 @@ def crawl(
         scd_api_key=settings.elsevier_api_key,
         scd_inst_token=settings.elsevier_inst_token,
         skip_translation=settings.skip_translation,
-        resume=resume,
-        resume_path=resume_path if resume else None,
+        progress_path=progress_path,
     )
     _print_report(report)
     raise typer.Exit(code=0 if not report.had_errors else 1)
@@ -217,14 +211,9 @@ def crawl_publisher(
         "--skip-translation",
         help="跳过翻译以提升速度。",
     ),
-    resume: bool = typer.Option(
-        False,
-        "--resume",
-        help="使用进度文件断点续跑（按 slug 跳过已完成并在成功后写回进度）。",
-    ),
-    resume_path: Path = typer.Option(
+    progress_path: Path = typer.Option(
         Path(".cache/crawl_progress.json"),
-        help="进度文件路径（配合 --resume 生效）。",
+        help="进度文件路径，默认开启断点续跑。",
     ),
 ) -> None:
     """按单一出版商运行抓取。"""
@@ -281,8 +270,7 @@ def crawl_publisher(
         scd_api_key=settings.elsevier_api_key,
         scd_inst_token=settings.elsevier_inst_token,
         skip_translation=settings.skip_translation,
-        resume=resume,
-        resume_path=resume_path if resume else None,
+        progress_path=progress_path,
     )
     _print_report(report)
     raise typer.Exit(code=0 if not report.had_errors else 1)
@@ -442,22 +430,36 @@ def _configure_logging(verbose: bool) -> None:
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
 
 
-def _load_completed_slugs(path: Path) -> set[str]:
+def _load_progress(path: Path) -> tuple[dict[str, set[str]], set[str]]:
+    """
+    返回 (per_entry, legacy_completed_slugs)。
+    per_entry: slug -> 已处理 entry.id 集合。
+    legacy_completed_slugs: 兼容旧版仅记录 slug 的进度文件。
+    """
+    per_entry: dict[str, set[str]] = {}
+    legacy_completed_slugs: set[str] = set()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list):
-            return {str(item) for item in data}
+            legacy_completed_slugs = {str(item) for item in data}
+        elif isinstance(data, dict):
+            raw_entries = data.get("completed_entries", {}) if isinstance(data.get("completed_entries", {}), dict) else {}
+            per_entry = {slug: {str(item) for item in items or []} for slug, items in raw_entries.items()}
+            legacy_raw = data.get("completed_slugs", [])
+            if isinstance(legacy_raw, list):
+                legacy_completed_slugs = {str(item) for item in legacy_raw}
     except FileNotFoundError:
-        return set()
+        return per_entry, legacy_completed_slugs
     except Exception:
         LOGGER.debug("读取进度文件失败 %s", path, exc_info=True)
-    return set()
+    return per_entry, legacy_completed_slugs
 
 
-def _save_completed_slugs(path: Path, slugs: set[str]) -> None:
+def _save_progress(path: Path, per_entry: dict[str, set[str]]) -> None:
+    payload = {"completed_entries": {slug: sorted(entries) for slug, entries in per_entry.items()}}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(sorted(slugs), ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         LOGGER.debug("写入进度文件失败 %s", path, exc_info=True)
 
@@ -471,15 +473,12 @@ def _run_once(
     scd_api_key: str | None,
     scd_inst_token: str | None,
     skip_translation: bool,
-    resume: bool = False,
-    resume_path: Path | None = None,
+    progress_path: Path,
 ) -> RunReport:
     started = datetime.now(timezone.utc)
     results: list[JournalRunResult] = []
     errors: list[str] = []
-    completed_slugs: set[str] = set()
-    if resume and resume_path:
-        completed_slugs = _load_completed_slugs(resume_path)
+    per_entry_progress, legacy_completed_slugs = _load_progress(progress_path)
 
     scd_crawler = ScienceDirect爬虫(feed_client, scd_api_key, scd_inst_token)
     oxford_crawler = Oxford爬虫(feed_client)
@@ -491,9 +490,10 @@ def _run_once(
     informs_crawler = Informs爬虫(feed_client)
 
     for journal in journals:
-        if resume and resume_path and journal.slug in completed_slugs:
-            LOGGER.info("跳过已完成 %s（resume）", journal.slug)
+        if journal.slug in legacy_completed_slugs:
+            LOGGER.info("跳过已完成 %s（来自旧版进度文件）", journal.slug)
             continue
+        completed_entries = set(per_entry_progress.get(journal.slug, set()))
         try:
             records = _crawl_with_dispatch(
                 journal,
@@ -507,35 +507,53 @@ def _run_once(
                 informs_crawler=informs_crawler,
                 feed_client=feed_client,
             )
-            base_store = store.persist(journal, records)
-            if skip_translation:
+            pending_records = [record for record in records if record.id not in completed_entries]
+            if not pending_records:
+                LOGGER.info("无待处理记录，跳过 %s（resume）", journal.slug)
                 results.append(
                     JournalRunResult(
                         journal=journal,
-                        fetched=len(records),
-                        added=base_store.added,
-                        updated=base_store.updated,
+                        fetched=0,
+                        added=0,
+                        updated=0,
                         translation_attempts=0,
                         translation_failures=0,
                     )
                 )
                 continue
 
-            translated_records, attempts, failures = _translate_records(records, translator, skip_translation)
+            base_store = store.persist(journal, pending_records)
+            if skip_translation:
+                results.append(
+                    JournalRunResult(
+                        journal=journal,
+                        fetched=len(pending_records),
+                        added=base_store.added,
+                        updated=base_store.updated,
+                        translation_attempts=0,
+                        translation_failures=0,
+                    )
+                )
+                completed_entries.update(record.id for record in pending_records)
+                per_entry_progress[journal.slug] = completed_entries
+                _save_progress(progress_path, per_entry_progress)
+                continue
+
+            translated_records, attempts, failures = _translate_records(pending_records, translator, skip_translation)
             trans_store = store.persist(journal, translated_records)
             results.append(
                 JournalRunResult(
                     journal=journal,
-                    fetched=len(records),
+                    fetched=len(pending_records),
                     added=base_store.added,
                     updated=base_store.updated + trans_store.updated,
                     translation_attempts=attempts,
                     translation_failures=failures,
                 )
             )
-            if resume and resume_path:
-                completed_slugs.add(journal.slug)
-                _save_completed_slugs(resume_path, completed_slugs)
+            completed_entries.update(record.id for record in pending_records)
+            per_entry_progress[journal.slug] = completed_entries
+            _save_progress(progress_path, per_entry_progress)
         except Exception as exc:  # noqa: BLE001
             msg = f"{journal.name}: {exc}"
             LOGGER.exception("处理失败 %s", journal.name)
