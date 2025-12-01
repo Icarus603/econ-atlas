@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -49,16 +49,16 @@ class Informs爬虫:
         self._session = _PersistentBrowserSession(SOURCE_TYPE)
         self._throttle_seconds = _throttle_seconds_from_env(SOURCE_TYPE)
 
-    def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
+    def iter_crawl(self, journal: JournalSource):
         entries = self._feed_client.fetch(journal.rss_url)
-        records: list[ArticleRecord] = []
         for entry in entries:
             record = _构建基础记录(entry)
             if self._throttle_seconds > 0:
                 time.sleep(self._throttle_seconds)
-            enriched = self._补全页面信息(record)
-            records.append(enriched)
-        return records
+            yield self._补全页面信息(record)
+
+    def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
+        return list(self.iter_crawl(journal))
 
     def _补全页面信息(self, record: ArticleRecord) -> ArticleRecord:
         if not record.link:
@@ -175,6 +175,7 @@ class _PersistentBrowserSession:
         self._browser = None
         self._context = None
         self._executor = ThreadPoolExecutor(max_workers=1)
+        self._timeout_seconds = _fetch_timeout_from_env(source_type)
 
     def _ensure_session(
         self,
@@ -287,7 +288,10 @@ class _PersistentBrowserSession:
             page.close()
             return html_text
 
-        return self._executor.submit(_run).result()
+        try:
+            return self._executor.submit(_run).result(timeout=self._timeout_seconds)
+        except FuturesTimeout as exc:  # pragma: no cover
+            raise TimeoutError(f"INFORMS 抓取超时 {url}") from exc
 
     def close(self) -> None:
         def _close() -> None:
@@ -323,3 +327,16 @@ def _throttle_seconds_from_env(source_type: str) -> float:
     except ValueError:
         LOGGER.warning("Invalid %s value: %s", env_key, raw)
         return 3.0
+
+
+def _fetch_timeout_from_env(source_type: str) -> float:
+    env_key = f"{source_type.upper()}_FETCH_TIMEOUT_SECONDS"
+    raw = os.getenv(env_key)
+    if not raw:
+        return 60.0
+    try:
+        value = float(raw)
+        return value if value > 0 else 60.0
+    except ValueError:
+        LOGGER.warning("Invalid %s value: %s", env_key, raw)
+        return 60.0

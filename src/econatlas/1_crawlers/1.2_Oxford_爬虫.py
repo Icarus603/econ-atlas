@@ -27,14 +27,15 @@ class Oxford爬虫:
         self._feed_client = feed_client
         self._enricher = OxfordEnricher()
 
-    def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
+    def iter_crawl(self, journal: JournalSource):
         entries = self._feed_client.fetch(journal.rss_url)
-        records: list[ArticleRecord] = []
         for entry in entries:
             record = _构建基础记录(entry)
             record = self._enricher.enrich(record, entry)
-            records.append(record)
-        return records
+            yield record
+
+    def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
+        return list(self.iter_crawl(journal))
 
     def close(self) -> None:
         try:

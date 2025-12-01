@@ -39,31 +39,21 @@ class ScienceDirect爬虫:
                 api_client=ScienceDirectApiClient(ElsevierApiConfig(api_key=api_key, inst_token=inst_token))
             )
 
-    def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
+    def iter_crawl(self, journal: JournalSource):
         entries = self._feed_client.fetch(journal.rss_url)
-        records: list[ArticleRecord] = []
-        failures: list[tuple[int, NormalizedFeedEntry]] = []
         for entry in entries:
             if self._throttle_seconds > 0:
                 time.sleep(self._throttle_seconds)
             record = _构建基础记录(entry)
             if self._enricher:
-                record, ok = self._enricher.enrich(record, entry)
-                if not ok:
-                    failures.append((len(records), entry))
-            records.append(record)
-        if self._enricher and failures:
-            LOGGER.info("ScienceDirect 首轮失败 %d 篇，开始补偿重试", len(failures))
-            for index, entry in failures:
-                if self._throttle_seconds > 0:
-                    time.sleep(self._throttle_seconds)
                 try:
-                    retry_record, ok = self._enricher.enrich(records[index], entry)
-                    if ok:
-                        records[index] = retry_record
+                    record, _ok = self._enricher.enrich(record, entry)
                 except Exception as exc:  # noqa: BLE001
-                    LOGGER.warning("ScienceDirect 重试失败 %s: %s", entry.link or entry.entry_id, exc)
-        return records
+                    LOGGER.warning("ScienceDirect 增强失败 %s: %s", entry.link or entry.entry_id, exc)
+            yield record
+
+    def crawl(self, journal: JournalSource) -> list[ArticleRecord]:
+        return list(self.iter_crawl(journal))
 
 
 def _构建基础记录(entry: NormalizedFeedEntry) -> ArticleRecord:

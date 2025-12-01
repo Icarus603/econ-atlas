@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import time
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -94,13 +95,52 @@ def _extract_abstract_from_api(payload: dict[str, Any]) -> str | None:
 
 def _extract_abstract(html: str) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
-    candidates = []
+    # 0) 页头 intro（NBER 摘要常在此处），存在则直接返回最长 intro 文本。
+    intro_texts = [
+        intro.get_text(" ", strip=True)
+        for intro in soup.find_all(class_=lambda cls: isinstance(cls, str) and "page-header__intro" in cls)
+    ]
+    intro_texts = [t for t in intro_texts if t]
+    if intro_texts:
+        return max(intro_texts, key=len)
+
+    # 1) JSON/JSON-LD 中的 description/abstract
+    json_candidates: list[str] = []
+
+    def _collect_descriptions(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key in {"description", "abstract"} and isinstance(value, str) and value.strip():
+                    json_candidates.append(value.strip())
+                _collect_descriptions(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                _collect_descriptions(item)
+
+    for script in soup.find_all("script"):
+        content = script.string or script.get_text()
+        if not content or ("abstract" not in content.lower() and "description" not in content.lower()):
+            continue
+        try:
+            data = json.loads(content)
+        except Exception:
+            continue
+        _collect_descriptions(data)
+    if json_candidates:
+        return max(json_candidates, key=len)
+
+    # 2) 标记 abstract 的容器
+    abstract_candidates: list[str] = []
     node = soup.find(id="abstract")
     if node:
-        candidates.append(node)
-    # 常见 class/id 包含 abstract 的容器
+        text = node.get_text(" ", strip=True)
+        if text:
+            abstract_candidates.append(text)
     for cls in ["abstract", "field--name-field-working-paper-abstract", "field--name-field-abstract"]:
-        candidates.extend(soup.find_all(class_=cls))
+        for tag in soup.find_all(class_=cls):
+            text = tag.get_text(" ", strip=True)
+            if text:
+                abstract_candidates.append(text)
     for tag in soup.find_all(["section", "div", "article"]):
         ident_parts = []
         ident_parts.append(str(tag.get("id", "")))
@@ -111,17 +151,29 @@ def _extract_abstract(html: str) -> str | None:
             ident_parts.append(cls_attr)
         ident = " ".join(ident_parts).lower()
         if "abstract" in ident:
-            candidates.append(tag)
-    for cand in candidates:
-        text = cand.get_text(" ", strip=True)
-        if text:
-            return text
+            text = tag.get_text(" ", strip=True)
+            if text:
+                abstract_candidates.append(text)
+    if abstract_candidates:
+        return max(abstract_candidates, key=len)
+
+    # 3) meta 描述作为兜底
+    meta_candidates: list[str] = []
     for meta_name in ("description", "og:description"):
-        meta = soup.find("meta", attrs={"name": meta_name})
+        meta = soup.find("meta", attrs={"name": meta_name}) or soup.find("meta", attrs={"property": meta_name})
         if meta:
             content = meta.get("content")
             if isinstance(content, str) and content.strip():
-                return content.strip()
+                meta_candidates.append(content.strip())
+    if meta_candidates:
+        return max(meta_candidates, key=len)
+
+    # 4) 兜底：页面内的段落文本，取最长一段。
+    paragraph_candidates = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
+    paragraph_candidates = [p for p in paragraph_candidates if p]
+    if paragraph_candidates:
+        return max(paragraph_candidates, key=len)
+
     return None
 
 

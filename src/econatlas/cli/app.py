@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Iterable, Literal, Optional, cast
 
 import typer
 from dotenv import load_dotenv
@@ -427,7 +427,11 @@ def _normalize_slug_filter(include_slug: Optional[list[str]]) -> set[str] | None
 
 def _configure_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=level,
+        format="[%(levelname)s] %(message)s",
+        force=True,  # 确保覆盖已有 handler，避免日志静默
+    )
 
 
 def _load_progress(path: Path) -> tuple[dict[str, set[str]], set[str]]:
@@ -494,8 +498,30 @@ def _run_once(
             LOGGER.info("跳过已完成 %s（来自旧版进度文件）", journal.slug)
             continue
         completed_entries = set(per_entry_progress.get(journal.slug, set()))
+        store.ensure_archive(journal)
+        # 防止进度文件与存档不一致：若存档里缺少标记为完成的条目，则重新抓取这些缺失条目。
         try:
-            records = _crawl_with_dispatch(
+            archive = store._load_archive(journal)  # pragma: no cover
+            archived_ids = {entry.id for entry in archive.entries}
+            missing = completed_entries - archived_ids
+            if missing:
+                LOGGER.info("检测到进度与存档不一致，重新抓取 %s 缺失的 %d 条", journal.slug, len(missing))
+                completed_entries -= missing
+                if completed_entries:
+                    per_entry_progress[journal.slug] = completed_entries
+                else:
+                    per_entry_progress.pop(journal.slug, None)
+        except Exception:
+            LOGGER.debug("校验存档与进度失败 %s", journal.slug, exc_info=True)
+        try:
+            LOGGER.info("开始 %s", journal.name)
+            fetched_total = 0
+            added_total = 0
+            updated_total = 0
+            translation_attempts = 0
+            translation_failures = 0
+
+            for record in _stream_records(
                 journal,
                 scd_crawler=scd_crawler,
                 oxford_crawler=oxford_crawler,
@@ -506,54 +532,45 @@ def _run_once(
                 chicago_crawler=chicago_crawler,
                 informs_crawler=informs_crawler,
                 feed_client=feed_client,
-            )
-            pending_records = [record for record in records if record.id not in completed_entries]
-            if not pending_records:
-                LOGGER.info("无待处理记录，跳过 %s（resume）", journal.slug)
-                results.append(
-                    JournalRunResult(
-                        journal=journal,
-                        fetched=0,
-                        added=0,
-                        updated=0,
-                        translation_attempts=0,
-                        translation_failures=0,
-                    )
-                )
-                continue
+            ):
+                fetched_total += 1
+                if record.id in completed_entries:
+                    LOGGER.info("%s | %s（已完成，跳过）", journal.name, record.title)
+                    continue
 
-            base_store = store.persist(journal, pending_records)
-            if skip_translation:
-                results.append(
-                    JournalRunResult(
-                        journal=journal,
-                        fetched=len(pending_records),
-                        added=base_store.added,
-                        updated=base_store.updated,
-                        translation_attempts=0,
-                        translation_failures=0,
-                    )
+                LOGGER.info("%s | %s", journal.name, record.title)
+                base_store = store.persist(journal, [record])
+                added_total += base_store.added
+                updated_total += base_store.updated
+
+                if skip_translation:
+                    completed_entries.add(record.id)
+                    per_entry_progress[journal.slug] = completed_entries
+                    _save_progress(progress_path, per_entry_progress)
+                    continue
+
+                translated_records, attempts, failures = _translate_records(
+                    [record], translator, skip_translation=False
                 )
-                completed_entries.update(record.id for record in pending_records)
+                translation_attempts += attempts
+                translation_failures += failures
+                trans_store = store.persist(journal, translated_records)
+                updated_total += trans_store.updated
+
+                completed_entries.add(record.id)
                 per_entry_progress[journal.slug] = completed_entries
                 _save_progress(progress_path, per_entry_progress)
-                continue
 
-            translated_records, attempts, failures = _translate_records(pending_records, translator, skip_translation)
-            trans_store = store.persist(journal, translated_records)
             results.append(
                 JournalRunResult(
                     journal=journal,
-                    fetched=len(pending_records),
-                    added=base_store.added,
-                    updated=base_store.updated + trans_store.updated,
-                    translation_attempts=attempts,
-                    translation_failures=failures,
+                    fetched=fetched_total,
+                    added=added_total,
+                    updated=updated_total,
+                    translation_attempts=translation_attempts,
+                    translation_failures=translation_failures,
                 )
             )
-            completed_entries.update(record.id for record in pending_records)
-            per_entry_progress[journal.slug] = completed_entries
-            _save_progress(progress_path, per_entry_progress)
         except Exception as exc:  # noqa: BLE001
             msg = f"{journal.name}: {exc}"
             LOGGER.exception("处理失败 %s", journal.name)
@@ -577,7 +594,7 @@ def _run_once(
     return RunReport(started_at=started, finished_at=finished, results=results, errors=errors)
 
 
-def _crawl_with_dispatch(
+def _stream_records(
     journal: JournalSource,
     *,
     scd_crawler: Any,
@@ -589,23 +606,32 @@ def _crawl_with_dispatch(
     chicago_crawler: Any,
     informs_crawler: Any,
     feed_client: FeedClient,
-) -> list[ArticleRecord]:
+) -> Iterable[ArticleRecord]:
+    def _iter_from(crawler: Any) -> Iterable[ArticleRecord]:
+        iter_crawl = getattr(crawler, "iter_crawl", None)
+        if callable(iter_crawl):
+            return cast(Iterable[ArticleRecord], iter_crawl(journal))
+        records = crawler.crawl(journal)
+        if isinstance(records, list):
+            return records
+        return cast(Iterable[ArticleRecord], records)
+
     if journal.source_type == "cnki":
-        return cast(list[ArticleRecord], cnki_crawler.crawl(journal))
+        return _iter_from(cnki_crawler)
     if journal.source_type == "sciencedirect":
-        return cast(list[ArticleRecord], scd_crawler.crawl(journal))
+        return _iter_from(scd_crawler)
     if journal.source_type == "oxford":
-        return cast(list[ArticleRecord], oxford_crawler.crawl(journal))
+        return _iter_from(oxford_crawler)
     if journal.source_type == "cambridge":
-        return cast(list[ArticleRecord], cambridge_crawler.crawl(journal))
+        return _iter_from(cambridge_crawler)
     if journal.source_type == "nber":
-        return cast(list[ArticleRecord], nber_crawler.crawl(journal))
+        return _iter_from(nber_crawler)
     if journal.source_type == "wiley":
-        return cast(list[ArticleRecord], wiley_crawler.crawl(journal))
+        return _iter_from(wiley_crawler)
     if journal.source_type == "chicago":
-        return cast(list[ArticleRecord], chicago_crawler.crawl(journal))
+        return _iter_from(chicago_crawler)
     if journal.source_type == "informs":
-        return cast(list[ArticleRecord], informs_crawler.crawl(journal))
+        return _iter_from(informs_crawler)
     # 其他来源：仅用 FeedClient 构建基础记录
     entries = feed_client.fetch(journal.rss_url)
     records: list[ArticleRecord] = []

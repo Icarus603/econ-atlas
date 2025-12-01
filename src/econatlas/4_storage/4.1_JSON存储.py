@@ -30,6 +30,22 @@ class JournalStore:
         self._output_dir = output_dir
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
+    def ensure_archive(self, journal: JournalSource) -> None:
+        """保证期刊对应的 JSON 存在（无条目时写入空档案）。"""
+        path = self._path_for(journal)
+        if path.exists():
+            return
+        archive = JournalArchive(
+            journal=JournalMetadata(
+                name=journal.name,
+                rss_url=journal.rss_url,
+                notes=journal.notes,
+                last_run_at=datetime.now(timezone.utc),
+            ),
+            entries=[],
+        )
+        self._write_archive(journal, archive)
+
     def persist(self, journal: JournalSource, entries: list[ArticleRecord]) -> StorageResult:
         archive = self._load_archive(journal)
         by_id: Dict[str, ArticleRecord] = {entry.id: entry for entry in archive.entries}
