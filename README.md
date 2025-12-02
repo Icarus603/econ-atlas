@@ -1,4 +1,4 @@
-<h1 align="center">Econ Atlas</h1>
+<h1 align="center">Econ-Atlas</h1>
 <p align="center">抓取并翻译经管类顶刊，逐篇写盘为标准化 JSON，内置断点续跑。</p>
 
 
