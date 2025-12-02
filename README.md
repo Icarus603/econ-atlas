@@ -1,5 +1,5 @@
 <h1 align="center">Econ Atlas</h1>
-<p align="center">抓取、增强并翻译经济学期刊，逐篇写盘为标准化 JSON，内置断点续跑。</p>
+<p align="center">抓取并翻译经管类顶刊，逐篇写盘为标准化 JSON，内置断点续跑。</p>
 
 
 ## 快速开始（3 步）
