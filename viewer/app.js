@@ -25,6 +25,9 @@ let activeJournal = null;
 let activeArchive = null;
 /** @type {string|null} */
 let activeEntryId = null;
+let indexRetryAttempt = 0;
+/** @type {number|null} */
+let indexRetryTimer = null;
 
 function formatDate(value) {
   if (!value) return "";
@@ -282,9 +285,35 @@ function isProbablyNonArticle(entry) {
 
   // Many "front matter" type entries have no authors and the abstract is just issue metadata.
   if (authors.length === 0) {
+    // CNKI sometimes publishes journal announcements under the journal name, but they are not papers.
+    if (
+      /^《[^》]{2,40}》/u.test(title) &&
+      /(知识服务|大讲堂|创刊|周年|四十载|致敬|写在|同贺|寄语)/u.test(title)
+    ) {
+      return true;
+    }
+
     if (titleLower.startsWith("issue information")) return true;
     if (abstractLower.trim() === "click on the article title to read more.") return true;
     if (/cssci/i.test(title)) return true;
+
+    // CNKI: some non-paper items are just a long list of institutions (e.g. universities/editorial offices).
+    // Heuristic: many organization tokens but almost no sentence punctuation.
+    const orgTokenCount = (abstract.match(/(大学|学院|研究所|编辑部|杂志社)/gu) || []).length;
+    const punctuationCount = (abstract.match(/[。.!?！？]/g) || []).length;
+    if (orgTokenCount >= 6 && punctuationCount <= 1 && abstract.length >= 40) return true;
+
+    // Journal promotion blurbs often mention accounts/channels rather than research content.
+    if (
+      abstract.includes("杂志社") &&
+      (abstract.includes("公众号") ||
+        abstract.includes("订阅号") ||
+        abstract.includes("服务号") ||
+        abstract.includes("中国知网") ||
+        abstract.includes("订阅"))
+    ) {
+      return true;
+    }
 
     const looksLikeIssueMeta =
       abstractLower.includes("volume") &&
@@ -317,10 +346,11 @@ function computeJournalBadge(item) {
 function renderHint(message, type = "info") {
   if (!message) {
     elements.hint.textContent = "";
+    elements.hint.removeAttribute("data-type");
     return;
   }
   elements.hint.textContent = message;
-  elements.hint.style.color = type === "error" ? "var(--bad)" : "var(--muted)";
+  elements.hint.setAttribute("data-type", type);
 }
 
 async function fetchJson(url) {
@@ -472,19 +502,40 @@ function renderDetail(entry) {
 
 async function loadIndex() {
   renderHint("");
+  if (indexRetryTimer !== null) {
+    window.clearTimeout(indexRetryTimer);
+    indexRetryTimer = null;
+  }
   try {
     const index = /** @type {ViewerIndex} */ (await fetchJson(`${INDEX_URL}?t=${Date.now()}`));
     viewerIndex = index;
     buildSourceOptions(index.journals);
     renderJournals();
     renderHint("");
+    indexRetryAttempt = 0;
   } catch (err) {
     viewerIndex = null;
     elements.journalList.innerHTML = "";
+    elements.stats.textContent = "0/0";
+
+    const maxAttempts = 6;
+    const delayMs = Math.min(30_000, 1_000 * 2 ** indexRetryAttempt);
+    const delaySec = Math.round(delayMs / 1_000);
+    const willRetry = indexRetryAttempt < maxAttempts;
+    const retryHint = willRetry ? `（${delaySec}s 后自动重试）` : "（已停止自动重试）";
+
     renderHint(
-      `无法加载 viewer/index.json。请确认你是通过本地 HTTP 服务打开（例如 http://127.0.0.1:8765/viewer/）。错误：${err}`,
+      `无法加载 viewer/index.json：本地 HTTP 服务可能未启动/已断开。请确认通过 http://127.0.0.1:8765/viewer/ 访问，或点“刷新索引”。${retryHint}\n错误：${err}`,
       "error"
     );
+
+    if (willRetry) {
+      indexRetryAttempt += 1;
+      indexRetryTimer = window.setTimeout(() => {
+        indexRetryTimer = null;
+        loadIndex();
+      }, delayMs);
+    }
   }
 }
 

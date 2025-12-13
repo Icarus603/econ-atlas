@@ -18,7 +18,7 @@ class FakeFeedClient:
 def test_cnki_crawler_builds_records() -> None:
     entry = NormalizedFeedEntry(
         entry_id="1",
-        title="t",
+        title="A &amp; B",
         summary="hello world",
         link="https://kns.cnki.net/kcms2/article/abstract?v=abc&uniplatform=NZKPT&language=CHS",
         authors=("a",),
@@ -31,5 +31,6 @@ def test_cnki_crawler_builds_records() -> None:
     rec = records[0]
     assert rec.id == "1"
     assert rec.link.startswith("https://kns.cnki.net/kns8/defaultresult/index?kw=")
+    assert rec.link.endswith("A+%26+B")
     assert rec.abstract_original == "hello world"
     assert rec.translation.status == "skipped"

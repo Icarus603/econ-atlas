@@ -10,7 +10,9 @@
   --accent-rgb: 74, 163, 216;
   --good: #4aa3d8;
   --bad: #ef4444;
+  --bad-rgb: 239, 68, 68;
   --warn: #f59e0b;
+  --warn-rgb: 245, 158, 11;
   --shadow: 0 10px 30px rgba(2, 6, 23, 0.06);
 }
 
@@ -145,6 +147,15 @@ body {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.hint[data-type="error"] {
+  color: var(--bad);
+  background: rgba(var(--bad-rgb), 0.09);
+  border: 1px solid rgba(var(--bad-rgb), 0.25);
+  padding: 10px 10px;
+  border-radius: 12px;
 }
 
 .list {

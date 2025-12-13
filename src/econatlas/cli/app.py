@@ -5,6 +5,7 @@ Typer CLI 入口：提供全量抓取、按出版商抓取，以及样本采集/
 from __future__ import annotations
 
 import csv
+import html
 import json
 import logging
 import shutil
@@ -902,7 +903,8 @@ def _cnki_search_url(title: str) -> str:
     query = (title or "").strip()
     if not query:
         return ""
-    return f"https://kns.cnki.net/kns8/defaultresult/index?kw={quote_plus(query)}"
+    normalized = html.unescape(query).strip()
+    return f"https://kns.cnki.net/kns8/defaultresult/index?kw={quote_plus(normalized)}"
 
 
 @viewer_app.command("serve")

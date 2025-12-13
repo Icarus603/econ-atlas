@@ -5,6 +5,7 @@ CNKI 爬虫：直接使用 RSS/JSON 数据，不做额外增强；翻译在后�
 from __future__ import annotations
 
 import logging
+import html
 from datetime import datetime, timezone
 from urllib.parse import quote_plus, urlparse
 
@@ -85,4 +86,5 @@ def _normalize_cnki_link(link: str, *, title: str) -> str:
     query = (title or "").strip()
     if not query:
         return raw
-    return f"https://kns.cnki.net/kns8/defaultresult/index?kw={quote_plus(query)}"
+    normalized = html.unescape(query).strip()
+    return f"https://kns.cnki.net/kns8/defaultresult/index?kw={quote_plus(normalized)}"
