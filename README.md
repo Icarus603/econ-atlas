@@ -1,78 +1,116 @@
 <h1 align="center">Econ-Atlas</h1>
-<p align="center">抓取并翻译经管类顶刊，逐篇写盘为标准化 JSON，内置断点续跑。</p>
+<p align="center">你的文献地图——经管类顶刊一站式本地浏览</p>
 
+## 你会得到什么
+- `data/*.json`：每个期刊一个 JSON 归档（包含文章元数据、原摘要、语言检测、中文翻译与翻译状态）。
+- `viewer/`：本地静态查看器（搜索/筛选/点开详情），通过本地 HTTP 服务打开阅读。
 
-## 快速开始（3 步）
-1) 克隆代码  
-   ```bash
-   git clone https://github.com/Icarus603/econ-atlas.git
-   cd econ-atlas
-   ```
-2) 安装依赖（Python 3.11+，推荐 [uv](https://docs.astral.sh/uv/)）  
-   ```bash
-   uv sync
-   # 浏览器安装：若用本机 Chrome（推荐），无需安装 Playwright 自带浏览器；
-   # 只在你想用内置 Chromium 时执行：
-   # uv run playwright install chromium
-   # 想改用 Playwright 的稳定版 Chrome 则：
-   # uv run playwright install chrome
-   ```
-3) 配置环境变量（必填，未填无法正常抓取）  
-   创建 `.env`（或在环境中导出）并按本机填写：
-   - 核心：`DEEPSEEK_API_KEY`（翻译用）  
-   - 浏览器：**必填**，全部按自己机器填写（路径、UA、Headers、Profile）。  
-     - 运行用哪个浏览器：填 `BROWSER_EXECUTABLE=<你的 Chrome 可执行路径>`，或用渠道 `BROWSER_CHANNEL=chrome`。路径请在本机找到对应二进制（示例仅供参考）。  
-     - UA/请求头：打开目标站点 → 开发者工具（Windows/Linux：F12 或 Ctrl+Shift+I；macOS：Cmd+Option+I）→ Network → 任意请求 → Headers → 复制 `user-agent` 到 `BROWSER_USER_AGENT`，复制完整 Request Headers 到 `BROWSER_HEADERS`。  
-     - 其他：`BROWSER_USER_DATA_DIR`（持久化 profile 目录）、`BROWSER_HEADLESS=true/false`。  
-   - 可选：`ELSEVIER_API_KEY`、`ELSEVIER_INST_TOKEN`（ScienceDirect API 增强）  
-   - 节流/超时（秒）：`OXFORD_THROTTLE_SECONDS`、`WILEY_THROTTLE_SECONDS`、`CHICAGO_THROTTLE_SECONDS`、`INFORMS_THROTTLE_SECONDS`、`SCIENCEDIRECT_THROTTLE_SECONDS`、`WILEY_FETCH_TIMEOUT_SECONDS`、`CHICAGO_FETCH_TIMEOUT_SECONDS`、`INFORMS_FETCH_TIMEOUT_SECONDS`  
-   - Cookies（如需登录态）：`OXFORD_COOKIES`、`WILEY_COOKIES`、`CHICAGO_COOKIES`、`INFORMS_COOKIES`
+## 依赖与环境
+- Python >= 3.11（建议使用 `uv` 管理依赖/虚拟环境）
+- 部分来源需要 Playwright + 本地浏览器环境（详见下方环境变量）
 
-## 运行方式
-- 全量抓取（含翻译，默认断点续跑）：  
-  ```bash
-  uv run econ-atlas crawl
-  ```
-- 按来源抓取：`uv run econ-atlas crawl publisher oxford`
-- 仅抓指定期刊 slug：`uv run econ-atlas crawl --include-slug nber`
-- 跳过翻译：在任意抓取命令添加 `--skip-translation`
-- 样本采集（抓页面 HTML 作调试）：`uv run econ-atlas samples collect --limit 3 --sdir-debug`
-- 样本清单导出：`uv run econ-atlas samples inventory --format csv > samples.csv`
-
-### 运行行为提示
-- 断点续跑：进度写入 `.cache/crawl_progress.json`，删除即可全量重跑，可用 `--progress-path` 自定义。
-- 输出：每篇期刊写入 `data/<slug>.json`，翻译结果也是逐篇落盘。
-- 日志：进入期刊时打印 `开始 <期刊名>`；每篇 `期刊名 | 标题`；已完成项会显示“已完成，跳过”。
-
-## 定时运行
-项目不内置调度，可用 cron/systemd。示例：每周一 02:00 全量抓取（可按需添加 `--skip-translation` 或筛选来源/期刊）：
-```cron
-0 2 * * 1 cd /path/to/econ-atlas && uv run econ-atlas crawl >> crawl.log 2>&1
+## 快速开始
+### 1) 安装
+```bash
+git clone https://github.com/Icarus603/econ-atlas.git
+cd econ-atlas
+uv sync
+```
+可选：如果你需要 Playwright 自带浏览器（不走本机 Chrome）：
+```bash
+uv run playwright install chromium
 ```
 
-## 目录速览
-- `src/econatlas/0_feeds/`：期刊列表解析、RSS/JSON 拉取与标准化。
-- `src/econatlas/1_crawlers/`：各来源爬虫（Oxford/Cambridge/NBER/Wiley/Chicago/INFORMS 走 Playwright，ScienceDirect 可走 Elsevier API）。
-- `src/econatlas/2_enrichers/`：页面/API 增强（NBER 摘要抽取、ScienceDirect API、元数据补全）。
-- `src/econatlas/3_translation/`：翻译基类与 DeepSeek 适配（可切换成 NoOp）。
-- `src/econatlas/4_storage/`：标准化 JSON 合并与写盘。
-- `src/econatlas/5_samples/`：浏览器采样与样本清单工具。
-- `src/econatlas/cli/app.py`：Typer CLI 入口；`config/settings.py` 处理参数与必填环境；`models.py` 定义数据模型。
-- `list.csv`：期刊来源配置；`data/`：抓取产物；`tests/`：单元/集成测试。
+### 2) 配置环境变量（`.env`）
+复制一份模板：
+```bash
+cp .env.example .env
+```
+按需填写（缺失会导致抓取/翻译失败）：
+- 翻译（可选）：`DEEPSEEK_API_KEY`
+- ScienceDirect API（可选）：`ELSEVIER_API_KEY`、`ELSEVIER_INST_TOKEN`
+- 浏览器（抓取受保护站点时通常需要，强烈建议按自己机器填写）：
+  - 二选一：`BROWSER_EXECUTABLE=<Chrome 路径>` 或 `BROWSER_CHANNEL=chrome`
+  - `BROWSER_USER_AGENT`：从浏览器 DevTools 的 Network 请求头复制
+  - `BROWSER_HEADERS`：从 DevTools 复制完整 Request Headers（JSON 或 cookie 形式都支持）
+  - `BROWSER_USER_DATA_DIR`：持久化 profile（对 Cloudflare/登录态常有帮助）
+  - `BROWSER_HEADLESS=true/false`
+- Cookies（按来源可选）：`OXFORD_COOKIES`、`WILEY_COOKIES`、`CHICAGO_COOKIES`、`INFORMS_COOKIES`、`NBER_COOKIES`
+- 节流/超时（秒，可选）：`*_THROTTLE_SECONDS`、`*_FETCH_TIMEOUT_SECONDS`、`TRANSLATION_THROTTLE_SECONDS`
 
-## 常用参数（抓取子命令）
-- `--include-source`：仅抓取指定来源类型（如 `sciencedirect`）。
-- `--include-slug`：仅抓特定期刊（支持多次传入）。
-- `--progress-path`：自定义断点续跑文件。
+### 3) 运行一次抓取
+```bash
+uv run econ-atlas crawl
+```
+
+## CLI 用法
+### 抓取
+- 全量抓取（含翻译，默认断点续跑）：`uv run econ-atlas crawl`
+- 按来源抓取：`uv run econ-atlas crawl publisher oxford`
+- 仅抓指定期刊：`uv run econ-atlas crawl --include-slug nber`
+- 跳过翻译：任意抓取命令加 `--skip-translation`
+
+### 样本（调试用）
+- 采集 HTML 样本：`uv run econ-atlas samples collect --limit 3 --sdir-debug`
+- 导出样本清单：`uv run econ-atlas samples inventory --format csv > samples.csv`
+
+## 本地查看器（更好读）
+查看器从 `data/*.json` 生成一个索引 `viewer/index.json`，浏览器据此加载期刊列表与统计。
+
+```bash
+# 启动本地服务（默认 127.0.0.1:8765）
+uv run econ-atlas viewer serve --port 8765
+```
+浏览器打开：`http://127.0.0.1:8765/viewer/`
+
+说明：
+- `crawl` 默认会自动更新 `viewer/index.json`
+- `viewer serve` 在 `index.json` 缺失时也会尝试自动生成（前提：仓库根目录下存在 `list.csv` 和 `data/`）
+
+## 断点续跑与输出
+- 断点续跑进度：默认写入 `.cache/crawl_progress.json`（删除即可全量重跑；可用 `--progress-path` 自定义）。
+- 输出文件：`data/<slug>.json`（CNKI 为中文期刊名文件）。
+- 运行日志：进入期刊打印 `开始 <期刊名>`；每篇条目打印 `期刊名 | 标题`；已完成条目显示“已完成，跳过”。
+
+## macOS：用 launchd 常驻 + 定时运行
+仓库内提供两份 `launchd` 模板（不提交个人路径），并提供脚本一键安装到本机：
+- 模板：`launchd/*.plist.template`
+- 安装：`launchd/install.sh`（生成并安装到 `~/Library/LaunchAgents/`）
+- 卸载：`launchd/uninstall.sh`
+
+安装（常驻 viewer + 每周一 02:00 定时 crawl）：
+```bash
+./launchd/install.sh --port 8765
+```
+
+仅安装常驻 viewer（不启用定时 crawl）：
+```bash
+./launchd/install.sh --port 8765 --no-crawl
+```
+
+卸载：
+```bash
+./launchd/uninstall.sh
+```
+
+注意：`launchd` 任务不会在机器睡眠时运行；如果你经常合盖，建议把定时点设在你通常开机/唤醒的时间段。模板中使用 `/usr/bin/caffeinate` 仅用于“任务启动后防止睡眠”，无法在机器已睡眠时强行启动任务。
+
+## 目录速览
+- `list.csv`：期刊列表（来源类型、RSS 链接等）
+- `data/`：抓取产物（每刊一个 JSON）
+- `viewer/`：本地静态查看器
+- `src/econatlas/`：核心代码（feeds/crawlers/enrichers/translation/storage/samples + CLI）
+- `tests/`：测试
 
 ## 开发与质量
-- 代码格式：`uv run ruff check . --fix`
-- 类型检查：`uv run mypy .`
-- 测试：`uv run pytest -q`
-- Python >=3.11，使用 uv 虚拟环境；避免 print 调试，推荐日志。
+```bash
+uv run ruff check . --fix
+uv run mypy .
+uv run pytest -q
+```
 
 ## 常见问题
-- 浏览器必填吗？是的，`.env` 需填你本机的浏览器可执行路径 + UA + Headers（从开发者工具复制）。只有在主动改用 Playwright 自带内核时才不需要这些值。
-- 缺少浏览器内核：如果不用本机 Chrome，请先安装 Playwright 浏览器：`uv run playwright install chromium`（或 `uv run playwright install chrome`），并调整 `BROWSER_CHANNEL`/`BROWSER_EXECUTABLE` 指向它。
-- ScienceDirect 增强未生效：检查 `ELSEVIER_API_KEY` / `ELSEVIER_INST_TOKEN` 是否设置。
-- 翻译被跳过：确保未传 `--skip-translation` 且存在 `DEEPSEEK_API_KEY`。
+- 查看器打不开 / 加载失败：必须通过 `http://` 打开（先运行 `uv run econ-atlas viewer serve`），不要直接双击 `viewer/index.html` 走 `file://`。
+- ScienceDirect 增强没生效：检查 `ELSEVIER_API_KEY` / `ELSEVIER_INST_TOKEN` 是否设置。
+- 翻译被跳过：确认未传 `--skip-translation` 且 `.env` 有 `DEEPSEEK_API_KEY`。
+- 终端代理影响本地 curl：如果 `http_proxy` 指向本地代理，测试本地服务可用 `curl --noproxy '*' http://127.0.0.1:8765/viewer/`。

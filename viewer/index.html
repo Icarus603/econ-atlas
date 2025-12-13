@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Econ-Atlas Viewer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="title">Econ-Atlas</div>
+        </div>
+
+        <div class="controls">
+          <input id="search" class="input" type="search" placeholder="搜索期刊/文章标题/作者…" />
+          <div class="row">
+            <select id="sourceFilter" class="select">
+              <option value="">全部来源</option>
+            </select>
+            <select id="statusFilter" class="select">
+              <option value="">全部翻译状态</option>
+              <option value="success">success</option>
+              <option value="failed">failed</option>
+              <option value="skipped">skipped</option>
+            </select>
+          </div>
+          <div class="row">
+            <button id="refresh" class="button">刷新索引</button>
+            <div id="stats" class="stats"></div>
+          </div>
+          <div id="hint" class="hint"></div>
+        </div>
+
+        <div class="list" id="journalList"></div>
+      </aside>
+
+      <main class="main">
+        <div class="main-header">
+          <div class="main-title" id="mainTitle">选择左侧期刊</div>
+          <div class="main-meta" id="mainMeta"></div>
+        </div>
+
+        <div class="content">
+          <div class="split">
+            <section class="panel" id="entriesPanel">
+              <div class="panel-header">文章</div>
+              <div class="panel-body" id="entries"></div>
+            </section>
+
+            <section class="panel" id="detailPanel">
+              <div class="panel-header">详情</div>
+              <div class="panel-body" id="detail">
+                <div class="empty">点击左侧文章查看摘要与翻译。</div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

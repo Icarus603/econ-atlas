@@ -10,6 +10,8 @@ import logging
 import shutil
 import os
 import time
+import http.server
+import functools
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import StringIO
@@ -88,6 +90,7 @@ class RunReport:
 app = typer.Typer(help="econ-atlas CLI")
 crawl_app = typer.Typer(help="运行 RSS 抓取")
 samples_app = typer.Typer(help="采集/导入/清点 HTML 样本")
+viewer_app = typer.Typer(help="本地静态查看器（浏览 data/*.json）")
 LOGGER = logging.getLogger(__name__)
 
 
@@ -179,6 +182,11 @@ def crawl(
         progress_path=progress_path,
     )
     _print_report(report)
+    # 默认自动更新本地查看器索引，避免用户手动执行 viewer build。
+    try:
+        _build_viewer_index(list_path=settings.list_path, data_dir=settings.output_dir, viewer_dir=Path("viewer"))
+    except Exception:
+        LOGGER.debug("生成 viewer/index.json 失败", exc_info=True)
     raise typer.Exit(code=0 if not report.had_errors else 1)
 
 
@@ -258,11 +266,17 @@ def crawl_publisher(
         progress_path=progress_path,
     )
     _print_report(report)
+    # 默认自动更新本地查看器索引，避免用户手动执行 viewer build。
+    try:
+        _build_viewer_index(list_path=settings.list_path, data_dir=settings.output_dir, viewer_dir=Path("viewer"))
+    except Exception:
+        LOGGER.debug("生成 viewer/index.json 失败", exc_info=True)
     raise typer.Exit(code=0 if not report.had_errors else 1)
 
 
 app.add_typer(crawl_app, name="crawl")
 app.add_typer(samples_app, name="samples")
+app.add_typer(viewer_app, name="viewer")
 
 
 @samples_app.command("collect")
@@ -667,8 +681,26 @@ def _translate_records(
     for idx, record in enumerate(records):
         summary = record.abstract_original or ""
         language = record.abstract_language
-        if not summary or (language and language.startswith("zh")):
+        if not summary:
             translated.append(record)
+            results.append(None)
+            continue
+        if language and language.startswith("zh"):
+            # 中文摘要无需翻译：对用户展示为已具备中文摘要（success），且填充 abstract_zh。
+            now = datetime.now(timezone.utc)
+            translated.append(
+                record.model_copy(
+                    update={
+                        "abstract_zh": record.abstract_zh or summary,
+                        "translation": TranslationRecord(
+                            status="success",
+                            translator=None,
+                            translated_at=now,
+                            error=None,
+                        ),
+                    }
+                )
+            )
             results.append(None)
             continue
         if throttle_seconds:
@@ -759,3 +791,145 @@ def _print_sample_summary(report: SampleCollectorReport) -> None:
         typer.echo(
             f"  - {result.journal.name} [{result.journal.source_type}] saved={len(result.saved_files)} [{status}]{browser_note}"
         )
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+@viewer_app.command("build")
+def build_viewer_index(
+    list_path: Path = typer.Option(Path("list.csv"), exists=True, help="期刊列表 CSV 路径。"),
+    data_dir: Path = typer.Option(Path("data"), help="抓取输出目录（包含 *.json）。"),
+    viewer_dir: Path = typer.Option(Path("viewer"), help="查看器目录（写入 index.json）。"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="开启详细日志。"),
+) -> None:
+    """生成 viewer/index.json，供浏览器快速加载期刊清单与统计。"""
+    _configure_logging(verbose)
+    path = _build_viewer_index(
+        list_path=list_path,
+        data_dir=data_dir,
+        viewer_dir=viewer_dir,
+    )
+    typer.echo(f"已生成 {path}")
+
+
+@viewer_app.command("serve")
+def serve_viewer(
+    port: int = typer.Option(8765, "--port", "-p", min=1, max=65535, help="监听端口。"),
+    bind: str = typer.Option("127.0.0.1", "--bind", help="监听地址（建议仅本机）。"),
+    root: Path = typer.Option(Path("."), "--root", help="HTTP 根目录（包含 viewer/ 和 data/）。"),
+) -> None:
+    """启动本地静态服务器，用于打开 viewer/（需要通过 http:// 访问）。"""
+    root = root.expanduser().resolve()
+    if not (root / "viewer").exists():
+        typer.secho(f"未找到 viewer 目录：{root / 'viewer'}", fg=typer.colors.YELLOW)
+
+    # 默认自动生成/更新索引，避免 index.json 缺失或路径不一致导致 404。
+    try:
+        _build_viewer_index(
+            list_path=root / "list.csv",
+            data_dir=root / "data",
+            viewer_dir=root / "viewer",
+        )
+    except Exception as exc:  # noqa: BLE001
+        typer.secho(
+            f"自动生成 viewer/index.json 失败：{exc}",
+            fg=typer.colors.YELLOW,
+        )
+
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    server = http.server.ThreadingHTTPServer((bind, port), handler)
+    url = f"http://{bind}:{port}/viewer/"
+    typer.echo(f"Serving {root} at {url}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+def _build_viewer_index(*, list_path: Path, data_dir: Path, viewer_dir: Path) -> Path:
+    root_dir = viewer_dir.expanduser().resolve().parent
+    journals = JournalListLoader(list_path).load()
+    store = JournalStore(data_dir)
+
+    items: list[dict[str, Any]] = []
+    for journal in journals:
+        archive_path = store.archive_path(journal)
+        if not archive_path.exists():
+            continue
+        try:
+            archive = json.loads(archive_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("读取失败 %s: %s", archive_path, exc)
+            continue
+
+        journal_node = archive.get("journal", {}) if isinstance(archive, dict) else {}
+        entries = archive.get("entries", []) if isinstance(archive, dict) else []
+        if not isinstance(entries, list):
+            entries = []
+
+        translation_counts = {"success": 0, "failed": 0, "skipped": 0}
+        latest_published: datetime | None = None
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            trans = entry.get("translation", {})
+            status = trans.get("status") if isinstance(trans, dict) else None
+            lang = entry.get("abstract_language")
+            if isinstance(lang, str) and lang.startswith("zh"):
+                translation_counts["success"] += 1
+            elif status in translation_counts:
+                translation_counts[cast(str, status)] += 1
+            published_at = _parse_iso_datetime(cast(Optional[str], entry.get("published_at")))
+            if published_at and (latest_published is None or published_at > latest_published):
+                latest_published = published_at
+
+        last_run_at = _parse_iso_datetime(cast(Optional[str], journal_node.get("last_run_at")))
+        resolved_archive = archive_path.expanduser().resolve()
+        archive_rel: Path
+        try:
+            archive_rel = resolved_archive.relative_to(root_dir)
+        except ValueError:
+            try:
+                data_rel = resolved_archive.relative_to(data_dir.expanduser().resolve())
+                archive_rel = Path(data_dir.name) / data_rel
+            except ValueError:
+                archive_rel = Path(data_dir.name) / resolved_archive.name
+
+        items.append(
+            {
+                "name": journal_node.get("name") or journal.name,
+                "slug": journal.slug,
+                "source_type": journal.source_type,
+                "entry_count": len(entries),
+                "last_run_at": last_run_at.isoformat() if last_run_at else None,
+                "latest_published_at": latest_published.isoformat() if latest_published else None,
+                "translation": translation_counts,
+                "archive_path": archive_rel.as_posix(),
+            }
+        )
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "journals": sorted(items, key=lambda x: (str(x.get("source_type", "")), str(x.get("name", "")))),
+    }
+    viewer_dir.mkdir(parents=True, exist_ok=True)
+    path = viewer_dir / "index.json"
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path

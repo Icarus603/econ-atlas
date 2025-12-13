@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.icarus603.econatlas.viewer</string>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>__UV_PATH__</string>
+      <string>run</string>
+      <string>econ-atlas</string>
+      <string>viewer</string>
+      <string>serve</string>
+      <string>--bind</string>
+      <string>127.0.0.1</string>
+      <string>--port</string>
+      <string>__PORT__</string>
+      <string>--root</string>
+      <string>__REPO_ROOT__</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/econatlas-viewer.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/econatlas-viewer.err.log</string>
+  </dict>
+</plist>
+

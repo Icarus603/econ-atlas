@@ -12,3 +12,5 @@ samples/
 __pycache__/
 .idea/
 *.trace.zip
+viewer/index.json
+launchd/*.plist

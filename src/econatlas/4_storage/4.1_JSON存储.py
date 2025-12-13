@@ -30,6 +30,10 @@ class JournalStore:
         self._output_dir = output_dir
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
+    def archive_path(self, journal: JournalSource) -> Path:
+        """返回期刊 JSON 档案路径（不保证存在）。"""
+        return self._path_for(journal)
+
     def ensure_archive(self, journal: JournalSource) -> None:
         """保证期刊对应的 JSON 存在（无条目时写入空档案）。"""
         path = self._path_for(journal)
