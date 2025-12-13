@@ -33,6 +33,36 @@ function formatDate(value) {
   return date.toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
+function looksLikeCnkiEphemeralLink(link) {
+  const value = String(link || "").trim();
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    if (!/\.cnki\.net$/i.test(url.hostname)) return false;
+    if (!url.pathname.startsWith("/kcms2/article/abstract")) return false;
+    return url.searchParams.has("v");
+  } catch {
+    return false;
+  }
+}
+
+function buildCnkiSearchUrl(title) {
+  const query = normalizeInlineText(title);
+  if (!query) return "";
+  return `https://kns.cnki.net/kns8/defaultresult/index?kw=${encodeURIComponent(query)}`;
+}
+
+function buildOriginalLink(entry, journal) {
+  const rawLink = String(entry?.link || "").trim();
+  const sourceType = String(journal?.source_type || "").trim().toLowerCase();
+  const title = String(entry?.title || "");
+  if (sourceType === "cnki" && looksLikeCnkiEphemeralLink(rawLink)) {
+    const fallback = buildCnkiSearchUrl(title);
+    if (fallback) return { url: fallback, label: "在 CNKI 搜索", note: "原始链接可能已失效（v 参数会过期）" };
+  }
+  return { url: rawLink, label: "打开原文", note: "" };
+}
+
 function escapeHtml(text) {
   return String(text)
     .replaceAll("&", "&amp;")
@@ -72,6 +102,16 @@ function formatAbstract(text, language) {
   let value = normalizeText(text || "");
   if (!value) return "";
   value = value.replace(/\r\n/g, "\n").trim();
+
+  // Strip CNKI placeholder markers like `<正>~` that are not HTML tags (CJK tag names
+  // don't get parsed by the HTML tokenizer, so they survive our HTML stripping).
+  for (let i = 0; i < 3; i += 1) {
+    const before = value;
+    value = value.replace(/^\s*<\s*[\p{Script=Han}]{1,8}\s*>\s*~?\s*/u, "");
+    if (value === before) break;
+  }
+  value = value.replaceAll(/^\s*<\s*[\p{Script=Han}]{1,8}\s*>\s*~?\s*$/gmu, "").trim();
+  if (/^[~\s]+$/.test(value)) return "";
 
   // Strip common heading prefixes.
   // Handles plain text ("Abstract ..."), glued text after stripping HTML ("AbstractWe ..."),
@@ -211,6 +251,7 @@ function isProbablyNonArticle(entry) {
 
   const titleMatchers = [
     /征稿(启事)?/u,
+    /征文(启事)?/u,
     /欢迎订阅/u,
     /投稿指南/u,
     /作者指南/u,
@@ -219,10 +260,13 @@ function isProbablyNonArticle(entry) {
     /更正|勘误/u,
     /目录/u,
     /致谢/u,
+    /鸣谢/u,
     /编者按/u,
+    /编委会|编辑委员会/u,
     /订阅/u,
     /call for papers/i,
     /announcement/i,
+    /issue information/i,
     /editorial/i,
     /editors?[’']?\s+notes/i,
     /erratum|corrigendum/i,
@@ -238,10 +282,16 @@ function isProbablyNonArticle(entry) {
 
   // Many "front matter" type entries have no authors and the abstract is just issue metadata.
   if (authors.length === 0) {
+    if (titleLower.startsWith("issue information")) return true;
+    if (abstractLower.trim() === "click on the article title to read more.") return true;
+    if (/cssci/i.test(title)) return true;
+
     const looksLikeIssueMeta =
       abstractLower.includes("volume") &&
       (abstractLower.includes("issue") || abstractLower.includes("page") || abstractLower.includes("pages"));
     if (looksLikeIssueMeta) return true;
+
+    if (/最佳论文奖|获奖名单/u.test(title)) return true;
   }
 
   // CNKI non-paper notices tend to have no authors and are short titles with promotional wording.
@@ -387,12 +437,16 @@ function renderDetail(entry) {
   const lang = String(entry.abstract_language || "");
   const original = formatAbstract(entry.abstract_original || "", lang);
   const zh = formatAbstract(entry.abstract_zh || "", "zh") || (lang.startsWith("zh") ? original : "");
-  const link = entry.link || "";
+  const { url: link, label: linkLabel, note: linkNote } = buildOriginalLink(entry, activeJournal);
 
   elements.detail.innerHTML = `
     <div class="detail-title">${escapeHtml(entry.title || "Untitled")}</div>
     <div class="detail-links">
-      ${link ? `<a class="link" href="${escapeHtml(link)}" target="_blank" rel="noreferrer">打开原文</a>` : ""}
+      ${
+        link
+          ? `<a class="link" href="${escapeHtml(link)}" target="_blank" rel="noreferrer"${linkNote ? ` title="${escapeHtml(linkNote)}"` : ""}>${escapeHtml(linkLabel)}</a>`
+          : ""
+      }
       <span class="pill ${cls}">${escapeHtml(label)}</span>
       ${lang ? `<span class="pill">${escapeHtml(lang)}</span>` : ""}
       ${published ? `<span class="pill">published ${escapeHtml(published)}</span>` : ""}

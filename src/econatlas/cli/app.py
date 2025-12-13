@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any, Iterable, Literal, Optional, cast
+from urllib.parse import quote_plus, urlparse
 
 import typer
 from dotenv import load_dotenv
@@ -822,6 +823,86 @@ def build_viewer_index(
         viewer_dir=viewer_dir,
     )
     typer.echo(f"已生成 {path}")
+
+
+@viewer_app.command("fix-cnki-links")
+def fix_cnki_links(
+    list_path: Path = typer.Option(Path("list.csv"), exists=True, help="期刊列表 CSV 路径。"),
+    data_dir: Path = typer.Option(Path("data"), help="抓取输出目录（包含 *.json）。"),
+    apply: bool = typer.Option(False, "--apply", help="写回 data/*.json（默认仅统计/预览）。"),
+) -> None:
+    """将 CNKI 条目中可能过期的 `kcms2/article/abstract?v=...` 链接替换为 CNKI 搜索链接。"""
+    journals = JournalListLoader(list_path).load()
+    store = JournalStore(data_dir)
+    total_archives = 0
+    total_changed = 0
+
+    for journal in journals:
+        if journal.source_type != "cnki":
+            continue
+        archive_path = store.archive_path(journal)
+        if not archive_path.exists():
+            continue
+        total_archives += 1
+        try:
+            archive = json.loads(archive_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            typer.secho(f"读取失败 {archive_path}: {exc}", fg=typer.colors.YELLOW)
+            continue
+        if not isinstance(archive, dict):
+            continue
+        entries = archive.get("entries")
+        if not isinstance(entries, list):
+            continue
+
+        changed = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            link = entry.get("link")
+            title = entry.get("title")
+            if not isinstance(link, str) or not isinstance(title, str):
+                continue
+            if not _looks_like_cnki_ephemeral_link(link):
+                continue
+            replacement = _cnki_search_url(title)
+            if not replacement or replacement == link:
+                continue
+            entry["link"] = replacement
+            changed += 1
+
+        if not changed:
+            continue
+        total_changed += changed
+        typer.echo(f"{archive_path}: {changed} links {'updated' if apply else 'would update'}")
+        if apply:
+            archive_path.write_text(json.dumps(archive, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    typer.echo(
+        f"CNKI archives scanned: {total_archives}; links {'updated' if apply else 'matched'}: {total_changed}"
+    )
+
+
+def _looks_like_cnki_ephemeral_link(link: str) -> bool:
+    raw = (link or "").strip()
+    if not raw:
+        return False
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return False
+    if not parsed.hostname or not parsed.hostname.endswith(".cnki.net"):
+        return False
+    if not parsed.path.startswith("/kcms2/article/abstract"):
+        return False
+    return "v=" in (parsed.query or "")
+
+
+def _cnki_search_url(title: str) -> str:
+    query = (title or "").strip()
+    if not query:
+        return ""
+    return f"https://kns.cnki.net/kns8/defaultresult/index?kw={quote_plus(query)}"
 
 
 @viewer_app.command("serve")

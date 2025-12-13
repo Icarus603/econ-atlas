@@ -20,7 +20,7 @@ def test_cnki_crawler_builds_records() -> None:
         entry_id="1",
         title="t",
         summary="hello world",
-        link="http://x",
+        link="https://kns.cnki.net/kcms2/article/abstract?v=abc&uniplatform=NZKPT&language=CHS",
         authors=("a",),
         published_at=datetime(2024, 1, 1),
     )
@@ -30,5 +30,6 @@ def test_cnki_crawler_builds_records() -> None:
     assert len(records) == 1
     rec = records[0]
     assert rec.id == "1"
+    assert rec.link.startswith("https://kns.cnki.net/kns8/defaultresult/index?kw=")
     assert rec.abstract_original == "hello world"
     assert rec.translation.status == "skipped"
