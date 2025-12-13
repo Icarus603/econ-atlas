@@ -78,7 +78,7 @@ uv run econ-atlas viewer serve --port 8765
 - 安装：`launchd/install.sh`（生成并安装到 `~/Library/LaunchAgents/`）
 - 卸载：`launchd/uninstall.sh`
 
-安装（常驻 viewer + 每周一 02:00 定时 crawl）：
+安装（常驻 viewer + 每周日 08:00 定时 crawl）：
 ```bash
 ./launchd/install.sh --port 8765
 ```
